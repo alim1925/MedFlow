@@ -1,0 +1,28 @@
+{
+  "name": "medflow2",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:seed": "node database/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "blob": "^0.1.0",
+    "jose": "^6.2.17",
+    "lucide-react": "^1.73.0",
+    "next": "16.4.6",
+    "pg": "^8.23.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
+    "tailwindcss": "4.3.3"
+  }
+}

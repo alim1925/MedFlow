@@ -1,0 +1,741 @@
+import { query, withTransaction } from '@/lib/db';
+import { getCurrentUser } from '@/lib/auth';
+import { scheduleSchema } from '@/lib/validators';
+import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
+
+async function requireDoctor() {
+  const user = await getCurrentUser();
+  if (!user) {
+    throw new ServiceError('Sesi tidak ditemukan. Silakan masuk terlebih dahulu.', 401);
+  }
+  if (user.role !== 'DOCTOR') {
+    throw new ServiceError(
+      'Akses ditolak: Hanya dokter yang diizinkan mengakses fitur ini.',
+      403
+    );
+  }
+
+  const res = await query(
+    'SELECT * FROM doctors WHERE user_id = $1 AND is_active = true',
+    [user.id]
+  );
+
+  if (res.rows.length === 0) {
+    throw new ServiceError(
+      'Data profil dokter tidak ditemukan atau status akun nonaktif.',
+      404
+    );
+  }
+
+  return { user, doctor: res.rows[0] };
+}
+
+function normalizeInput(input) {
+  if (typeof FormData !== 'undefined' && input instanceof FormData) {
+    return Object.fromEntries(input.entries());
+  }
+  return input || {};
+}
+
+export async function getDoctorProfile() {
+  try {
+    const { doctor } = await requireDoctor();
+
+    const res = await query(
+      `SELECT 
+         d.*,
+         p.name AS poli_name,
+         p.description AS poli_description,
+         u.email
+       FROM doctors d
+       LEFT JOIN polis p ON d.poli_id = p.id
+       JOIN users u ON d.user_id = u.id
+       WHERE d.id = $1`,
+      [doctor.id]
+    );
+
+    return {
+      success: true,
+      data: res.rows[0] || null,
+    };
+  } catch (err) {
+    return toServiceErrorResult('getDoctorProfile', err);
+  }
+}
+
+export async function getMySchedules() {
+  try {
+    const { doctor } = await requireDoctor();
+
+    const res = await query(
+      `SELECT * FROM doctor_schedules 
+       WHERE doctor_id = $1 AND is_active = true 
+       ORDER BY day_of_week ASC, start_time ASC`,
+      [doctor.id]
+    );
+
+    return {
+      success: true,
+      data: res.rows,
+    };
+  } catch (err) {
+    return toServiceErrorResult('getMySchedules', err);
+  }
+}
+
+export async function createSchedule(input) {
+  try {
+    const { doctor } = await requireDoctor();
+    const raw = normalizeInput(input);
+
+    const parsedRaw = {
+      ...raw,
+      doctor_id: doctor.id,
+      day_of_week: Number(raw.day_of_week),
+      slot_minutes: raw.slot_minutes !== undefined ? Number(raw.slot_minutes) : 15,
+    };
+
+    const validation = scheduleSchema.safeParse(parsedRaw);
+    if (!validation.success) {
+      return {
+        success: false,
+        error: validation.error.errors[0]?.message || 'Data jadwal tidak valid.',
+        status: 400,
+      };
+    }
+
+    const { day_of_week, start_time, end_time, slot_minutes } = validation.data;
+
+    if (start_time >= end_time) {
+      return {
+        success: false,
+        error: 'Jam mulai harus lebih awal dari jam selesai.',
+        status: 400,
+      };
+    }
+
+    const res = await query(
+      `INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time, slot_minutes, is_active)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING *`,
+      [doctor.id, day_of_week, start_time, end_time, slot_minutes || 15]
+    );
+
+    return {
+      success: true,
+      data: res.rows[0],
+    };
+  } catch (err) {
+    return toServiceErrorResult('createSchedule', err);
+  }
+}
+
+export async function updateSchedule(id, input) {
+  try {
+    const { doctor } = await requireDoctor();
+    const raw = normalizeInput(input);
+
+    const parsedRaw = {
+      ...raw,
+      doctor_id: doctor.id,
+      day_of_week: Number(raw.day_of_week),
+      slot_minutes: raw.slot_minutes !== undefined ? Number(raw.slot_minutes) : 15,
+    };
+
+    const validation = scheduleSchema.safeParse(parsedRaw);
+    if (!validation.success) {
+      return {
+        success: false,
+        error: validation.error.errors[0]?.message || 'Data jadwal tidak valid.',
+        status: 400,
+      };
+    }
+
+    const { day_of_week, start_time, end_time, slot_minutes } = validation.data;
+
+    if (start_time >= end_time) {
+      return {
+        success: false,
+        error: 'Jam mulai harus lebih awal dari jam selesai.',
+        status: 400,
+      };
+    }
+
+    const res = await query(
+      `UPDATE doctor_schedules
+       SET day_of_week = $1, start_time = $2, end_time = $3, slot_minutes = $4, updated_at = NOW()
+       WHERE id = $5 AND doctor_id = $6
+       RETURNING *`,
+      [day_of_week, start_time, end_time, slot_minutes || 15, id, doctor.id]
+    );
+
+    if (res.rows.length === 0) {
+      return {
+        success: false,
+        error: 'Jadwal tidak ditemukan atau tidak memiliki akses.',
+        status: 404,
+      };
+    }
+
+    return {
+      success: true,
+      data: res.rows[0],
+    };
+  } catch (err) {
+    return toServiceErrorResult('updateSchedule', err);
+  }
+}
+
+export async function deleteSchedule(id) {
+  try {
+    const { doctor } = await requireDoctor();
+
+    const res = await query(
+      `UPDATE doctor_schedules
+       SET is_active = false, updated_at = NOW()
+       WHERE id = $1 AND doctor_id = $2
+       RETURNING *`,
+      [id, doctor.id]
+    );
+
+    if (res.rows.length === 0) {
+      return {
+        success: false,
+        error: 'Jadwal tidak ditemukan atau tidak memiliki akses.',
+        status: 404,
+      };
+    }
+
+    return {
+      success: true,
+      data: res.rows[0],
+    };
+  } catch (err) {
+    return toServiceErrorResult('deleteSchedule', err);
+  }
+}
+
+export async function getTodaysAppointments() {
+  try {
+    const { doctor } = await requireDoctor();
+
+    const res = await query(
+      `SELECT 
+         a.*,
+         p.full_name AS patient_name,
+         p.medical_record_no,
+         p.birth_date,
+         p.gender,
+         p.blood_type,
+         p.phone AS patient_phone,
+         p.allergies
+       FROM appointments a
+       JOIN patients p ON a.patient_id = p.id
+       WHERE a.doctor_id = $1 
+         AND a.appointment_date = CURRENT_DATE 
+         AND a.status IN ('PENDING', 'CONFIRMED')
+       ORDER BY a.queue_no ASC NULLS LAST, a.slot_start ASC`,
+      [doctor.id]
+    );
+
+    return {
+      success: true,
+      data: res.rows,
+    };
+  } catch (err) {
+    return toServiceErrorResult('getTodaysAppointments', err);
+  }
+}
+
+export async function getMyExaminations() {
+  try {
+    const { doctor } = await requireDoctor();
+    const res = await query(
+      `SELECT
+         mr.id,
+         mr.appointment_id,
+         mr.diagnosis,
+         mr.icd10_code,
+         mr.created_at,
+         p.full_name AS patient_name,
+         p.medical_record_no,
+         a.appointment_date,
+         a.slot_start
+       FROM medical_records mr
+       JOIN appointments a ON a.id = mr.appointment_id
+       JOIN patients p ON p.id = mr.patient_id
+       WHERE mr.doctor_id = $1
+       ORDER BY mr.created_at DESC`,
+      [doctor.id]
+    );
+
+    return { success: true, data: res.rows };
+  } catch (err) {
+    return toServiceErrorResult('getMyExaminations', err);
+  }
+}
+
+export async function getPendingAppointments() {
+  try {
+    const { doctor } = await requireDoctor();
+
+    const res = await query(
+      `SELECT 
+         a.*,
+         p.full_name AS patient_name,
+         p.birth_date,
+         p.medical_record_no,
+         p.gender,
+         p.blood_type,
+         p.phone AS patient_phone,
+         p.allergies
+       FROM appointments a
+       JOIN patients p ON a.patient_id = p.id
+       WHERE a.doctor_id = $1 AND a.status = 'PENDING'
+       ORDER BY a.appointment_date ASC, a.slot_start ASC, a.created_at ASC`,
+      [doctor.id]
+    );
+
+    return {
+      success: true,
+      data: res.rows,
+    };
+  } catch (err) {
+    return toServiceErrorResult('getPendingAppointments', err);
+  }
+}
+
+export async function confirmAppointment(appointmentId) {
+  try {
+    const { user, doctor } = await requireDoctor();
+
+    const result = await withTransaction(async (client) => {
+      const apptRes = await client.query(
+        `SELECT a.*, p.user_id AS patient_user_id, p.full_name AS patient_name
+         FROM appointments a
+         JOIN patients p ON a.patient_id = p.id
+         WHERE a.id = $1 AND a.doctor_id = $2 AND a.status = 'PENDING'
+         FOR UPDATE`,
+        [appointmentId, doctor.id]
+      );
+
+      if (apptRes.rows.length === 0) {
+        throw new ServiceError(
+          'Janji temu tidak ditemukan atau status sudah tidak menunggu konfirmasi.',
+          404
+        );
+      }
+
+      const appt = apptRes.rows[0];
+
+      const queueRes = await client.query(
+        `SELECT COALESCE(MAX(queue_no), 0) + 1 AS next_queue
+         FROM appointments
+         WHERE doctor_id = $1 AND appointment_date = $2 AND status = 'CONFIRMED'`,
+        [doctor.id, appt.appointment_date]
+      );
+      const nextQueueNo = queueRes.rows[0].next_queue;
+
+      const updateRes = await client.query(
+        `UPDATE appointments
+         SET status = 'CONFIRMED', queue_no = $1, updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [nextQueueNo, appt.id]
+      );
+      const confirmedAppt = updateRes.rows[0];
+
+      const dateStr = new Date(appt.appointment_date).toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+
+      await client.query(
+        `INSERT INTO notifications (user_id, title, message, type)
+         VALUES ($1, $2, $3, 'APPOINTMENT')`,
+        [
+          appt.patient_user_id,
+          'Janji Temu Dikonfirmasi',
+          `Janji temu Anda pada ${dateStr} pukul ${appt.slot_start.slice(0, 5)} WIB telah dikonfirmasi oleh dr. ${doctor.full_name}. Nomor antrean Anda: ${nextQueueNo}.`,
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'CONFIRM_APPOINTMENT', 'appointments', $2, $3)`,
+        [
+          user.id,
+          appt.id,
+          JSON.stringify({
+            queue_no: nextQueueNo,
+            appointment_date: appt.appointment_date,
+            patient_name: appt.patient_name,
+          }),
+        ]
+      );
+
+      return confirmedAppt;
+    });
+
+    return {
+      success: true,
+      data: result,
+    };
+  } catch (err) {
+    return toServiceErrorResult('confirmAppointment', err);
+  }
+}
+
+export async function rejectAppointment(appointmentId, reason) {
+  try {
+    const { user, doctor } = await requireDoctor();
+
+    if (!reason || !reason.trim()) {
+      return { success: false, error: 'Alasan penolakan wajib diisi.', status: 400 };
+    }
+
+    const result = await withTransaction(async (client) => {
+      const apptRes = await client.query(
+        `SELECT a.*, p.user_id AS patient_user_id
+         FROM appointments a
+         JOIN patients p ON a.patient_id = p.id
+         WHERE a.id = $1 AND a.doctor_id = $2 AND a.status = 'PENDING'
+         FOR UPDATE`,
+        [appointmentId, doctor.id]
+      );
+
+      if (apptRes.rows.length === 0) {
+        throw new ServiceError('Janji temu tidak ditemukan atau sudah diproses.', 404);
+      }
+
+      const appt = apptRes.rows[0];
+
+      const updateRes = await client.query(
+        `UPDATE appointments
+         SET status = 'REJECTED', rejection_reason = $1, updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [reason.trim(), appt.id]
+      );
+      const rejectedAppt = updateRes.rows[0];
+
+      await client.query(
+        `INSERT INTO notifications (user_id, title, message, type)
+         VALUES ($1, $2, $3, 'APPOINTMENT')`,
+        [
+          appt.patient_user_id,
+          'Janji Temu Ditolak',
+          `Permohonan janji temu Anda telah ditolak oleh dr. ${doctor.full_name} dengan alasan: "${reason.trim()}". Silakan pilih jadwal lain.`,
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'REJECT_APPOINTMENT', 'appointments', $2, $3)`,
+        [user.id, appt.id, JSON.stringify({ reason: reason.trim() })]
+      );
+
+      return rejectedAppt;
+    });
+
+    return {
+      success: true,
+      data: result,
+    };
+  } catch (err) {
+    return toServiceErrorResult('rejectAppointment', err);
+  }
+}
+
+export async function getAppointmentWithPatient(appointmentId) {
+  try {
+    const { doctor } = await requireDoctor();
+
+    const apptRes = await query(
+      `SELECT 
+         a.*,
+         p.id AS patient_id,
+         p.user_id AS patient_user_id,
+         p.full_name AS patient_name,
+         p.medical_record_no,
+         p.nik,
+         p.birth_date,
+         p.gender,
+         p.blood_type,
+         p.phone AS patient_phone,
+         p.address AS patient_address,
+         p.emergency_contact,
+         p.allergies,
+         d.full_name AS doctor_name,
+         pol.name AS poli_name
+       FROM appointments a
+       JOIN patients p ON a.patient_id = p.id
+       JOIN doctors d ON a.doctor_id = d.id
+       LEFT JOIN polis pol ON d.poli_id = pol.id
+       WHERE a.id = $1 AND a.doctor_id = $2`,
+      [appointmentId, doctor.id]
+    );
+
+    if (apptRes.rows.length === 0) {
+      return {
+        success: false,
+        error: 'Janji temu tidak ditemukan atau Anda tidak memiliki akses.',
+        status: 404,
+      };
+    }
+
+    const appt = apptRes.rows[0];
+
+    const medRecRes = await query(
+      `SELECT * FROM medical_records WHERE appointment_id = $1`,
+      [appointmentId]
+    );
+
+    const medicalRecord = medRecRes.rows[0] || null;
+    let addenda = [];
+    let prescription = null;
+
+    if (medicalRecord) {
+      const addendaRes = await query(
+        `SELECT mra.*, d.full_name AS doctor_name
+         FROM medical_record_addenda mra
+         JOIN doctors d ON mra.doctor_id = d.id
+         WHERE mra.medical_record_id = $1
+         ORDER BY mra.created_at ASC`,
+        [medicalRecord.id]
+      );
+      addenda = addendaRes.rows;
+
+      const prescRes = await query(
+        `SELECT 
+           pr.*,
+           COALESCE(
+             json_agg(
+               json_build_object(
+                 'id', pi.id,
+                 'medicine_id', pi.medicine_id,
+                 'medicine_name', m.name,
+                 'medicine_code', m.code,
+                 'quantity', pi.quantity,
+                 'dosage_rule', pi.dosage_rule,
+                 'duration_days', pi.duration_days,
+                 'unit', m.unit
+               )
+             ) FILTER (WHERE pi.id IS NOT NULL),
+             '[]'::json
+           ) AS items
+         FROM prescriptions pr
+         LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
+         LEFT JOIN medicines m ON pi.medicine_id = m.id
+         WHERE pr.medical_record_id = $1
+         GROUP BY pr.id`,
+        [medicalRecord.id]
+      );
+      prescription = prescRes.rows[0] || null;
+    }
+
+    return {
+      success: true,
+      data: {
+        ...appt,
+        medical_record: medicalRecord,
+        addenda,
+        prescription,
+      },
+    };
+  } catch (err) {
+    return toServiceErrorResult('getAppointmentWithPatient', err);
+  }
+}
+
+export async function saveMedicalRecord(appointmentId, recordData, prescriptionItems = []) {
+  try {
+    const { user, doctor } = await requireDoctor();
+
+    if (!recordData?.diagnosis || !recordData.diagnosis.trim()) {
+      return { success: false, error: 'Diagnosis wajib diisi.', status: 400 };
+    }
+
+    const result = await withTransaction(async (client) => {
+      const apptRes = await client.query(
+        `SELECT a.*, p.user_id AS patient_user_id
+         FROM appointments a
+         JOIN patients p ON a.patient_id = p.id
+         WHERE a.id = $1 AND a.doctor_id = $2
+         FOR UPDATE`,
+        [appointmentId, doctor.id]
+      );
+
+      if (apptRes.rows.length === 0) {
+        throw new ServiceError('Janji temu tidak ditemukan atau bukan milik Anda.', 404);
+      }
+
+      const appt = apptRes.rows[0];
+
+      if (appt.status !== 'CONFIRMED') {
+        throw new ServiceError(
+          `Rekam medis hanya dapat dibuat untuk janji temu dengan status DIKONFIRMASI. Status saat ini: ${appt.status}`,
+          400
+        );
+      }
+
+      const existingRecord = await client.query(
+        'SELECT id FROM medical_records WHERE appointment_id = $1',
+        [appointmentId]
+      );
+
+      if (existingRecord.rows.length > 0) {
+        throw new ServiceError(
+          'Rekam medis untuk janji temu ini sudah pernah disimpan dan bersifat permanen. Gunakan fitur Addendum untuk catatan tambahan.',
+          409
+        );
+      }
+
+      const vitalSigns = recordData.vital_signs
+        ? typeof recordData.vital_signs === 'string'
+          ? recordData.vital_signs
+          : JSON.stringify(recordData.vital_signs)
+        : null;
+
+      const medRecRes = await client.query(
+        `INSERT INTO medical_records (
+           appointment_id, patient_id, doctor_id, complaint,
+           vital_signs, diagnosis, icd10_code, treatment, notes, locked_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         RETURNING id`,
+        [
+          appt.id,
+          appt.patient_id,
+          doctor.id,
+          recordData.complaint?.trim() || appt.complaint,
+          vitalSigns,
+          recordData.diagnosis.trim(),
+          recordData.icd10_code?.trim() || null,
+          recordData.treatment?.trim() || null,
+          recordData.notes?.trim() || null,
+        ]
+      );
+      const newMedicalRecord = medRecRes.rows[0];
+
+      let prescriptionId = null;
+
+      if (Array.isArray(prescriptionItems) && prescriptionItems.length > 0) {
+        const prescRes = await client.query(
+          `INSERT INTO prescriptions (medical_record_id, status)
+           VALUES ($1, 'WAITING')
+           RETURNING id`,
+          [newMedicalRecord.id]
+        );
+        prescriptionId = prescRes.rows[0].id;
+
+        for (const item of prescriptionItems) {
+          if (!item.medicine_id || !item.quantity || Number(item.quantity) <= 0 || !item.dosage_rule) {
+            throw new ServiceError(
+              'Item resep tidak lengkap. Pastikan obat, jumlah, dan aturan pakai terisi dengan benar.',
+              400
+            );
+          }
+
+          await client.query(
+            `INSERT INTO prescription_items (prescription_id, medicine_id, quantity, dosage_rule, duration_days)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+              prescriptionId,
+              item.medicine_id,
+              Number(item.quantity),
+              item.dosage_rule.trim(),
+              item.duration_days ? Number(item.duration_days) : null,
+            ]
+          );
+        }
+      }
+
+      await client.query(
+        `UPDATE appointments
+         SET status = 'COMPLETED', updated_at = NOW()
+         WHERE id = $1`,
+        [appt.id]
+      );
+
+      await client.query(
+        `INSERT INTO notifications (user_id, title, message, type)
+         VALUES ($1, $2, $3, 'MEDICAL_RECORD')`,
+        [
+          appt.patient_user_id,
+          'Pemeriksaan Selesai',
+          `Pemeriksaan oleh dr. ${doctor.full_name} telah selesai. Hasil diagnosis dan resep obat dapat Anda lihat di aplikasi MedFlow.`,
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'SAVE_MEDICAL_RECORD', 'medical_records', $2, $3)`,
+        [
+          user.id,
+          newMedicalRecord.id,
+          JSON.stringify({
+            appointment_id: appt.id,
+            diagnosis: recordData.diagnosis.trim(),
+            has_prescription: !!prescriptionId,
+          }),
+        ]
+      );
+
+      return {
+        recordId: newMedicalRecord.id,
+        prescriptionId,
+      };
+    });
+
+    return {
+      success: true,
+      data: result,
+      recordId: result.recordId,
+    };
+  } catch (err) {
+    return toServiceErrorResult('saveMedicalRecord', err);
+  }
+}
+
+export async function addAddendum(medicalRecordId, note) {
+  try {
+    const { user, doctor } = await requireDoctor();
+
+    if (!note || !note.trim()) {
+      return { success: false, error: 'Catatan addendum wajib diisi.', status: 400 };
+    }
+
+    const medRecRes = await query(
+      'SELECT id, appointment_id FROM medical_records WHERE id = $1',
+      [medicalRecordId]
+    );
+
+    if (medRecRes.rows.length === 0) {
+      return { success: false, error: 'Rekam medis tidak ditemukan.', status: 404 };
+    }
+
+    const res = await query(
+      `INSERT INTO medical_record_addenda (medical_record_id, doctor_id, note)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [medicalRecordId, doctor.id, note.trim()]
+    );
+
+    const newAddendum = res.rows[0];
+
+    await query(
+      `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+       VALUES ($1, 'ADD_ADDENDUM', 'medical_record_addenda', $2, $3)`,
+      [user.id, newAddendum.id, JSON.stringify({ medical_record_id: medicalRecordId })]
+    );
+
+    return {
+      success: true,
+      data: newAddendum,
+    };
+  } catch (err) {
+    return toServiceErrorResult('addAddendum', err);
+  }
+}

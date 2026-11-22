@@ -1,6 +1,6 @@
 import { query, withTransaction } from '@/lib/db';
-import { getCurrentUser } from '@/lib/auth';
-import { bookingSchema, feedbackSchema } from '@/lib/validators';
+import { getCurrentUser, createSession } from '@/lib/auth';
+import { bookingSchema, feedbackSchema, patientProfileUpdateSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
 
 /**
@@ -44,6 +44,99 @@ export async function getPatientProfile() {
     };
   } catch (err) {
     return toServiceErrorResult('getPatientProfile', err);
+  }
+}
+
+export async function updatePatientProfile(input) {
+  try {
+    const { user, patient } = await requirePatient();
+    const raw = normalizeInput(input);
+
+    const validation = patientProfileUpdateSchema.safeParse({
+      full_name: raw.full_name,
+      nik: raw.nik?.trim() || '',
+      birth_date: raw.birth_date,
+      gender: raw.gender,
+      blood_type: raw.blood_type?.trim() || '',
+      phone: raw.phone?.trim() || '',
+      address: raw.address?.trim() || '',
+      emergency_contact: raw.emergency_contact?.trim() || '',
+      allergies: raw.allergies?.trim() || '',
+    });
+
+    if (!validation.success) {
+      return {
+        success: false,
+        error: validation.error.errors[0]?.message || 'Data profil pasien tidak valid.',
+        status: 400,
+      };
+    }
+
+    const d = validation.data;
+
+    const res = await query(
+      `UPDATE patients
+       SET full_name = $1,
+           nik = $2,
+           birth_date = $3,
+           gender = $4,
+           blood_type = $5,
+           phone = $6,
+           address = $7,
+           emergency_contact = $8,
+           allergies = $9,
+           updated_at = NOW()
+       WHERE id = $10
+       RETURNING *`,
+      [
+        d.full_name.trim(),
+        d.nik ? d.nik.trim() : null,
+        d.birth_date,
+        d.gender,
+        d.blood_type ? d.blood_type.trim() : null,
+        d.phone ? d.phone.trim() : null,
+        d.address ? d.address.trim() : null,
+        d.emergency_contact ? d.emergency_contact.trim() : null,
+        d.allergies ? d.allergies.trim() : null,
+        patient.id,
+      ]
+    );
+
+    const updated = res.rows[0];
+
+    await query(
+      `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+       VALUES ($1, 'UPDATE_PATIENT_PROFILE', 'patients', $2, $3)`,
+      [
+        user.id,
+        patient.id,
+        JSON.stringify({
+          full_name: updated.full_name,
+          phone: updated.phone,
+        }),
+      ]
+    );
+
+    if (updated.full_name !== user.name) {
+      await createSession({
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: updated.full_name,
+        patientId: user.patientId || patient.id,
+        doctorId: user.doctorId || null,
+      }).catch(() => {});
+    }
+
+    return {
+      success: true,
+      data: updated,
+    };
+  } catch (err) {
+    if (err.code === '23505') {
+      return { success: false, error: 'NIK sudah terdaftar pada akun pasien lain.', status: 409 };
+    }
+    return toServiceErrorResult('updatePatientProfile', err);
   }
 }
 

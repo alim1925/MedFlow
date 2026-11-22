@@ -1,7 +1,22 @@
 import { query, withTransaction } from '@/lib/db';
-import { getCurrentUser } from '@/lib/auth';
-import { scheduleSchema } from '@/lib/validators';
+import { getCurrentUser, createSession } from '@/lib/auth';
+import { scheduleSchema, doctorProfileUpdateSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
+import { transitionAppointmentStatus } from '@/services/appointmentStatusService';
+
+let doctorColumnsPromise = null;
+
+async function ensureDoctorColumns() {
+  if (!doctorColumnsPromise) {
+    doctorColumnsPromise = query(`
+      ALTER TABLE doctors ADD COLUMN IF NOT EXISTS phone VARCHAR(30);
+    `).catch((err) => {
+      doctorColumnsPromise = null;
+      throw err;
+    });
+  }
+  return doctorColumnsPromise;
+}
 
 async function requireDoctor() {
   const user = await getCurrentUser();
@@ -39,6 +54,7 @@ function normalizeInput(input) {
 
 export async function getDoctorProfile() {
   try {
+    await ensureDoctorColumns();
     const { doctor } = await requireDoctor();
 
     const res = await query(
@@ -60,6 +76,95 @@ export async function getDoctorProfile() {
     };
   } catch (err) {
     return toServiceErrorResult('getDoctorProfile', err);
+  }
+}
+
+export async function updateDoctorProfile(input) {
+  try {
+    await ensureDoctorColumns();
+    const { user, doctor } = await requireDoctor();
+    const raw = normalizeInput(input);
+
+    const validation = doctorProfileUpdateSchema.safeParse({
+      full_name: raw.full_name,
+      str_number: raw.str_number,
+      phone: raw.phone?.trim() || '',
+      bio: raw.bio?.trim() || '',
+      photo_url: raw.photo_url?.trim() || '',
+    });
+
+    if (!validation.success) {
+      return {
+        success: false,
+        error: validation.error.errors[0]?.message || 'Data profil dokter tidak valid.',
+        status: 400,
+      };
+    }
+
+    const d = validation.data;
+
+    await query(
+      `UPDATE doctors
+       SET full_name = $1,
+           str_number = $2,
+           phone = $3,
+           bio = $4,
+           photo_url = $5,
+           updated_at = NOW()
+       WHERE id = $6`,
+      [
+        d.full_name.trim(),
+        d.str_number.trim(),
+        d.phone ? d.phone.trim() : null,
+        d.bio ? d.bio.trim() : null,
+        d.photo_url ? d.photo_url.trim() : null,
+        doctor.id,
+      ]
+    );
+
+    const refreshed = await query(
+      `SELECT d.*, p.name AS poli_name, p.description AS poli_description, u.email
+       FROM doctors d
+       LEFT JOIN polis p ON d.poli_id = p.id
+       JOIN users u ON d.user_id = u.id
+       WHERE d.id = $1`,
+      [doctor.id]
+    );
+    const updated = refreshed.rows[0];
+
+    await query(
+      `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+       VALUES ($1, 'UPDATE_DOCTOR_PROFILE', 'doctors', $2, $3)`,
+      [
+        user.id,
+        doctor.id,
+        JSON.stringify({
+          full_name: updated.full_name,
+          str_number: updated.str_number,
+        }),
+      ]
+    );
+
+    if (updated.full_name !== user.name) {
+      await createSession({
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: updated.full_name,
+        patientId: user.patientId || null,
+        doctorId: user.doctorId || doctor.id,
+      }).catch(() => {});
+    }
+
+    return {
+      success: true,
+      data: updated,
+    };
+  } catch (err) {
+    if (err.code === '23505') {
+      return { success: false, error: 'Nomor STR sudah terdaftar pada dokter lain.', status: 409 };
+    }
+    return toServiceErrorResult('updateDoctorProfile', err);
   }
 }
 
@@ -305,77 +410,53 @@ export async function getPendingAppointments() {
   }
 }
 
+export async function getDoctorAppointments(statusFilter = '') {
+  try {
+    const { doctor } = await requireDoctor();
+
+    const params = [doctor.id];
+    let statusClause = '';
+    if (statusFilter) {
+      statusClause = ' AND a.status = $2';
+      params.push(statusFilter);
+    }
+
+    const res = await query(
+      `SELECT 
+         a.*,
+         p.full_name AS patient_name,
+         p.birth_date,
+         p.medical_record_no,
+         p.gender,
+         p.blood_type,
+         p.phone AS patient_phone,
+         p.allergies
+       FROM appointments a
+       JOIN patients p ON a.patient_id = p.id
+       WHERE a.doctor_id = $1${statusClause}
+       ORDER BY a.appointment_date DESC, a.slot_start ASC, a.created_at DESC`,
+      params
+    );
+
+    return {
+      success: true,
+      data: res.rows,
+    };
+  } catch (err) {
+    return toServiceErrorResult('getDoctorAppointments', err);
+  }
+}
+
 export async function confirmAppointment(appointmentId) {
   try {
     const { user, doctor } = await requireDoctor();
 
-    const result = await withTransaction(async (client) => {
-      const apptRes = await client.query(
-        `SELECT a.*, p.user_id AS patient_user_id, p.full_name AS patient_name
-         FROM appointments a
-         JOIN patients p ON a.patient_id = p.id
-         WHERE a.id = $1 AND a.doctor_id = $2 AND a.status = 'PENDING'
-         FOR UPDATE`,
-        [appointmentId, doctor.id]
-      );
-
-      if (apptRes.rows.length === 0) {
-        throw new ServiceError(
-          'Janji temu tidak ditemukan atau status sudah tidak menunggu konfirmasi.',
-          404
-        );
-      }
-
-      const appt = apptRes.rows[0];
-
-      const queueRes = await client.query(
-        `SELECT COALESCE(MAX(queue_no), 0) + 1 AS next_queue
-         FROM appointments
-         WHERE doctor_id = $1 AND appointment_date = $2 AND status = 'CONFIRMED'`,
-        [doctor.id, appt.appointment_date]
-      );
-      const nextQueueNo = queueRes.rows[0].next_queue;
-
-      const updateRes = await client.query(
-        `UPDATE appointments
-         SET status = 'CONFIRMED', queue_no = $1, updated_at = NOW()
-         WHERE id = $2
-         RETURNING *`,
-        [nextQueueNo, appt.id]
-      );
-      const confirmedAppt = updateRes.rows[0];
-
-      const dateStr = new Date(appt.appointment_date).toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
-
-      await client.query(
-        `INSERT INTO notifications (user_id, title, message, type)
-         VALUES ($1, $2, $3, 'APPOINTMENT')`,
-        [
-          appt.patient_user_id,
-          'Janji Temu Dikonfirmasi',
-          `Janji temu Anda pada ${dateStr} pukul ${appt.slot_start.slice(0, 5)} WIB telah dikonfirmasi oleh dr. ${doctor.full_name}. Nomor antrean Anda: ${nextQueueNo}.`,
-        ]
-      );
-
-      await client.query(
-        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
-         VALUES ($1, 'CONFIRM_APPOINTMENT', 'appointments', $2, $3)`,
-        [
-          user.id,
-          appt.id,
-          JSON.stringify({
-            queue_no: nextQueueNo,
-            appointment_date: appt.appointment_date,
-            patient_name: appt.patient_name,
-          }),
-        ]
-      );
-
-      return confirmedAppt;
+    const result = await transitionAppointmentStatus({
+      appointmentId,
+      actorUser: user,
+      doctorScopeId: doctor.id,
+      actorLabel: doctor.full_name,
+      targetStatus: 'CONFIRMED',
     });
 
     return {
@@ -391,52 +472,13 @@ export async function rejectAppointment(appointmentId, reason) {
   try {
     const { user, doctor } = await requireDoctor();
 
-    if (!reason || !reason.trim()) {
-      return { success: false, error: 'Alasan penolakan wajib diisi.', status: 400 };
-    }
-
-    const result = await withTransaction(async (client) => {
-      const apptRes = await client.query(
-        `SELECT a.*, p.user_id AS patient_user_id
-         FROM appointments a
-         JOIN patients p ON a.patient_id = p.id
-         WHERE a.id = $1 AND a.doctor_id = $2 AND a.status = 'PENDING'
-         FOR UPDATE`,
-        [appointmentId, doctor.id]
-      );
-
-      if (apptRes.rows.length === 0) {
-        throw new ServiceError('Janji temu tidak ditemukan atau sudah diproses.', 404);
-      }
-
-      const appt = apptRes.rows[0];
-
-      const updateRes = await client.query(
-        `UPDATE appointments
-         SET status = 'REJECTED', rejection_reason = $1, updated_at = NOW()
-         WHERE id = $2
-         RETURNING *`,
-        [reason.trim(), appt.id]
-      );
-      const rejectedAppt = updateRes.rows[0];
-
-      await client.query(
-        `INSERT INTO notifications (user_id, title, message, type)
-         VALUES ($1, $2, $3, 'APPOINTMENT')`,
-        [
-          appt.patient_user_id,
-          'Janji Temu Ditolak',
-          `Permohonan janji temu Anda telah ditolak oleh dr. ${doctor.full_name} dengan alasan: "${reason.trim()}". Silakan pilih jadwal lain.`,
-        ]
-      );
-
-      await client.query(
-        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
-         VALUES ($1, 'REJECT_APPOINTMENT', 'appointments', $2, $3)`,
-        [user.id, appt.id, JSON.stringify({ reason: reason.trim() })]
-      );
-
-      return rejectedAppt;
+    const result = await transitionAppointmentStatus({
+      appointmentId,
+      actorUser: user,
+      doctorScopeId: doctor.id,
+      actorLabel: doctor.full_name,
+      targetStatus: 'REJECTED',
+      reason,
     });
 
     return {
@@ -445,6 +487,28 @@ export async function rejectAppointment(appointmentId, reason) {
     };
   } catch (err) {
     return toServiceErrorResult('rejectAppointment', err);
+  }
+}
+
+export async function updateAppointmentStatusByDoctor(appointmentId, targetStatus, reason = '') {
+  try {
+    const { user, doctor } = await requireDoctor();
+
+    const result = await transitionAppointmentStatus({
+      appointmentId,
+      actorUser: user,
+      doctorScopeId: doctor.id,
+      actorLabel: doctor.full_name,
+      targetStatus,
+      reason,
+    });
+
+    return {
+      success: true,
+      data: result,
+    };
+  } catch (err) {
+    return toServiceErrorResult('updateAppointmentStatusByDoctor', err);
   }
 }
 

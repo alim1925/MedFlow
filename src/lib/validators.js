@@ -101,6 +101,8 @@ export const scheduleSchema = z.object({
 export const medicineSchema = z.object({
   code: z.string().trim().min(2, 'Kode obat minimal 2 karakter'),
   name: z.string().trim().min(2, 'Nama obat minimal 2 karakter'),
+  description: z.string().trim().optional().nullable(),
+  medicine_type: z.enum(['BIASA', 'KERAS']).default('BIASA'),
   category: z.string().trim().min(1, 'Kategori obat wajib diisi'),
   form: z.string().trim().min(1, 'Bentuk obat wajib diisi'),
   unit: z.string().trim().min(1, 'Satuan obat wajib diisi'),
@@ -134,4 +136,120 @@ export const feedbackSchema = z.object({
   appointment_id: z.string().uuid('ID janji temu tidak valid'),
   rating: z.number().int().min(1).max(5, 'Rating harus bernilai 1 sampai 5'),
   comment: z.string().trim().optional(),
+});
+
+// ============================================================================
+// 8. Operational & Financial Reports Schemas
+// ============================================================================
+
+export const revenueSchema = z.object({
+  reference_no: z.string().trim().optional(),
+  transaction_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD'),
+  category: z.enum(['POLI_SERVICE', 'PHARMACY', 'LABORATORY', 'ADMINISTRATION', 'OTHER'], {
+    errorMap: () => ({ message: 'Kategori pendapatan tidak valid' }),
+  }),
+  description: z.string().trim().min(3, 'Deskripsi pendapatan minimal 3 karakter'),
+  amount: z.number().min(0, 'Nominal pendapatan tidak boleh negatif'),
+  payment_method: z.enum(['CASH', 'TRANSFER', 'QRIS', 'BPJS', 'INSURANCE']).default('CASH'),
+  notes: z.string().trim().optional(),
+});
+
+export const expenseSchema = z.object({
+  reference_no: z.string().trim().optional(),
+  transaction_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD'),
+  category: z.enum(['MEDICINE_PURCHASE', 'UTILITIES', 'MEDICAL_SUPPLIES', 'FACILITY', 'ADMINISTRATION', 'OTHER'], {
+    errorMap: () => ({ message: 'Kategori pengeluaran tidak valid' }),
+  }),
+  description: z.string().trim().min(3, 'Deskripsi pengeluaran minimal 3 karakter'),
+  amount: z.number().min(0, 'Nominal pengeluaran tidak boleh negatif'),
+  vendor: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+});
+
+export const payrollSchema = z.object({
+  employee_name: z.string().trim().min(2, 'Nama pegawai/dokter wajib diisi'),
+  doctor_id: z.string().uuid().optional().nullable(),
+  role_title: z.string().trim().min(2, 'Jabatan/profesi wajib diisi'),
+  period_month: z.string().regex(/^\d{4}-\d{2}$/, 'Format periode gaji harus YYYY-MM'),
+  base_salary: z.number().min(0, 'Gaji pokok tidak boleh negatif'),
+  allowance: z.number().min(0, 'Tunjangan tidak boleh negatif').default(0),
+  deduction: z.number().min(0, 'Potongan tidak boleh negatif').default(0),
+  status: z.enum(['PENDING', 'PAID']).default('PENDING'),
+  notes: z.string().trim().optional(),
+});
+
+export const receivableSchema = z.object({
+  invoice_number: z.string().trim().min(3, 'Nomor tagihan minimal 3 karakter'),
+  debtor_name: z.string().trim().min(2, 'Nama debitur/penjamin wajib diisi'),
+  debtor_type: z.enum(['PATIENT', 'BPJS', 'INSURANCE', 'CORPORATE']).default('PATIENT'),
+  patient_id: z.string().uuid().optional().nullable(),
+  description: z.string().trim().optional(),
+  total_amount: z.number().positive('Total tagihan harus lebih besar dari 0'),
+  paid_amount: z.number().min(0, 'Jumlah terbayar tidak boleh negatif').default(0),
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format jatuh tempo harus YYYY-MM-DD'),
+  status: z.enum(['UNPAID', 'PARTIAL', 'PAID', 'OVERDUE']).optional(),
+  notes: z.string().trim().optional(),
+});
+
+export const receivablePaymentSchema = z.object({
+  payment_amount: z.number().positive('Nominal pembayaran harus lebih besar dari 0'),
+  payment_method: z.enum(['CASH', 'TRANSFER', 'QRIS', 'BPJS', 'INSURANCE']).default('TRANSFER'),
+  record_as_revenue: z.boolean().default(true),
+  notes: z.string().trim().optional(),
+});
+
+export const maintenanceSchema = z.object({
+  equipment_code: z.string().trim().min(2, 'Kode alat medis wajib diisi'),
+  equipment_name: z.string().trim().min(2, 'Nama alat medis wajib diisi'),
+  department: z.string().trim().optional(),
+  maintenance_type: z.enum(['PREVENTIVE', 'CALIBRATION', 'REPAIR']).default('PREVENTIVE'),
+  maintenance_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal pemeliharaan harus YYYY-MM-DD'),
+  next_maintenance_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal('')).nullable(),
+  vendor_name: z.string().trim().optional(),
+  cost: z.number().min(0, 'Biaya pemeliharaan tidak boleh negatif').default(0),
+  status: z.enum(['SCHEDULED', 'IN_PROGRESS', 'COMPLETED']).default('SCHEDULED'),
+  notes: z.string().trim().optional(),
+});
+
+// ============================================================================
+// 9. Self-Service Profile Update Schemas (Patient & Doctor)
+// ============================================================================
+
+export const patientProfileUpdateSchema = z.object({
+  full_name: z.string().trim().min(2, 'Nama lengkap minimal 2 karakter'),
+  nik: z
+    .string()
+    .trim()
+    .regex(/^\d{16}$/, 'NIK harus tepat 16 digit angka')
+    .optional()
+    .or(z.literal(''))
+    .nullable(),
+  birth_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal lahir harus YYYY-MM-DD'),
+  gender: z.enum(['L', 'P'], { required_error: 'Pilih jenis kelamin (L/P)' }),
+  blood_type: z.string().trim().max(5, 'Golongan darah maksimal 5 karakter').optional().nullable(),
+  phone: z.string().trim().min(8, 'Nomor telepon minimal 8 digit').optional().or(z.literal('')).nullable(),
+  address: z.string().trim().optional().nullable(),
+  emergency_contact: z.string().trim().optional().nullable(),
+  allergies: z.string().trim().optional().nullable(),
+});
+
+export const doctorProfileUpdateSchema = z.object({
+  full_name: z.string().trim().min(2, 'Nama lengkap minimal 2 karakter'),
+  str_number: z.string().trim().min(5, 'Nomor STR minimal 5 karakter'),
+  phone: z.string().trim().max(30, 'Nomor telepon maksimal 30 karakter').optional().nullable(),
+  bio: z.string().trim().optional().nullable(),
+  photo_url: z.string().trim().optional().nullable(),
+});
+
+// ============================================================================
+// 10. Equipment Damage Report Schema (Doctor)
+// ============================================================================
+
+export const equipmentDamageReportSchema = z.object({
+  equipment_code: z.string().trim().min(2, 'Kode alat medis minimal 2 karakter'),
+  equipment_name: z.string().trim().min(2, 'Nama alat medis minimal 2 karakter'),
+  department: z.string().trim().optional().nullable(),
+  severity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
+  reported_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD'),
+  description: z.string().trim().min(5, 'Deskripsi kerusakan minimal 5 karakter'),
 });

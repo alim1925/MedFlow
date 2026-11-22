@@ -17,7 +17,8 @@ import {
   FileText,
   Clock,
   Sparkles,
-  PackageX
+  PackageX,
+  BarChart3
 } from 'lucide-react';
 
 export const metadata = {
@@ -311,7 +312,7 @@ export default async function AdminDashboardPage() {
           <h2 className="text-sm font-heading font-bold text-slate-800 uppercase tracking-wider mb-4">
             Modul Administrasi MedFlow
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4">
             <Link
               href="/admin/users"
               className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:border-sky-300 hover:shadow-md transition text-center group"
@@ -365,6 +366,17 @@ export default async function AdminDashboardPage() {
               </div>
               <h3 className="text-xs font-heading font-bold text-slate-800">Farmasi</h3>
               <p className="text-[10px] text-slate-400 mt-0.5">Antrean Resep</p>
+            </Link>
+
+            <Link
+              href="/admin/reports"
+              className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:border-sky-300 hover:shadow-md transition text-center group"
+            >
+              <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center mx-auto mb-2 group-hover:bg-cyan-500 group-hover:text-white transition">
+                <BarChart3 className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-heading font-bold text-slate-800">Operasional</h3>
+              <p className="text-[10px] text-slate-400 mt-0.5">Keuangan, Gaji & Alat</p>
             </Link>
 
             <Link

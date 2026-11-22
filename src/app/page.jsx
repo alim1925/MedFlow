@@ -421,7 +421,7 @@ export default async function HomePage() {
                   </div>
 
                   <div className="pt-5 mt-5 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-xs text-slate-400">Jadwal: Senin - Sabtu</span>
+                    <span className="text-xs text-slate-400">Jadwal: Senin - Jumat</span>
                     <Link
                       href={`/patient/booking?poli=${poli.id}`}
                       className="text-xs font-semibold text-sky-600 hover:text-sky-700 inline-flex items-center gap-1 group-hover:translate-x-0.5 transition-transform"
@@ -793,7 +793,7 @@ export default async function HomePage() {
               <div className="pt-2 text-xs text-sky-200/70 space-y-1">
                 <p className="flex items-center gap-2">
                   <MapPin className="w-4 h-4 text-sky-300" />
-                  <span>Jl. Sehat Harmoni No. 88, Jakarta Pusat 10110</span>
+                  <span>Jl. Sehat Harmoni No. 88, Makassar 10110</span>
                 </p>
                 <p className="flex items-center gap-2">
                   <PhoneCall className="w-4 h-4 text-sky-300" />
@@ -843,7 +843,7 @@ export default async function HomePage() {
                 </div>
                 <div className="pt-2">
                   <span className="font-semibold text-white block">Poli Rawat Jalan:</span>
-                  <span>Senin - Sabtu: 08.00 - 20.00 WIB</span>
+                  <span>Senin - Jumat: 08.00 - 20.00 WIB</span>
                 </div>
                 <div className="pt-2">
                   <span className="font-semibold text-white block">Instalasi Farmasi:</span>

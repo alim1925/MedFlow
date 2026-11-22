@@ -7,6 +7,7 @@ import {
   Pill,
   Plus,
   Pencil,
+  Trash2,
   RotateCw,
   Search,
   AlertTriangle,
@@ -22,12 +23,14 @@ export default function AdminMedicinesPage() {
   const [medicines, setMedicines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('ALL');
   const [lowStockOnly, setLowStockOnly] = useState(false);
 
   // Modals
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [showRestockModal, setShowRestockModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedMedicine, setSelectedMedicine] = useState(null);
   const [restockQty, setRestockQty] = useState(50);
 
@@ -39,6 +42,8 @@ export default function AdminMedicinesPage() {
   const [formData, setFormData] = useState({
     code: '',
     name: '',
+    description: '',
+    medicine_type: 'BIASA',
     category: 'Analgesik',
     dosage_form: 'Tablet',
     unit: 'tablet',
@@ -54,14 +59,16 @@ export default function AdminMedicinesPage() {
       const normalizedQuery = searchQuery.trim().toLowerCase();
       setMedicines(
         medicines.filter((medicine) => {
+          const medType = (medicine.medicine_type || 'BIASA').toUpperCase();
           const matchesQuery =
             !normalizedQuery ||
-            [medicine.name, medicine.code, medicine.category]
+            [medicine.name, medicine.code, medicine.category, medicine.description, medType]
               .filter(Boolean)
               .some((value) => value.toLowerCase().includes(normalizedQuery));
+          const matchesType = typeFilter === 'ALL' || medType === typeFilter;
           const matchesStock =
             !lowStockOnly || medicine.stock <= medicine.min_stock;
-          return matchesQuery && matchesStock;
+          return matchesQuery && matchesType && matchesStock;
         })
       );
     } catch (err) {
@@ -69,7 +76,7 @@ export default function AdminMedicinesPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, lowStockOnly]);
+  }, [searchQuery, typeFilter, lowStockOnly]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -83,6 +90,8 @@ export default function AdminMedicinesPage() {
     setFormData({
       code: 'MED-' + Math.floor(1000 + Math.random() * 9000),
       name: '',
+      description: '',
+      medicine_type: 'BIASA',
       category: 'Analgesik',
       dosage_form: 'Tablet',
       unit: 'tablet',
@@ -98,11 +107,13 @@ export default function AdminMedicinesPage() {
     setFormData({
       code: med.code || '',
       name: med.name || '',
+      description: med.description || '',
+      medicine_type: (med.medicine_type || 'BIASA').toUpperCase() === 'KERAS' ? 'KERAS' : 'BIASA',
       category: med.category || 'Analgesik',
-      dosage_form: med.dosage_form || 'Tablet',
+      dosage_form: med.dosage_form || med.form || 'Tablet',
       unit: med.unit || 'tablet',
-      stock: med.stock || 0,
-      min_stock: med.min_stock || 20,
+      stock: med.stock ?? 0,
+      min_stock: med.min_stock ?? 20,
     });
     setError('');
     setShowModal(true);
@@ -113,6 +124,38 @@ export default function AdminMedicinesPage() {
     setRestockQty(50);
     setError('');
     setShowRestockModal(true);
+  };
+
+  const openDeleteModal = (med) => {
+    setSelectedMedicine(med);
+    setError('');
+    setShowDeleteModal(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!selectedMedicine) return;
+    setSubmitting(true);
+    setError('');
+
+    try {
+      const res = await apiRequest(`/api/admin/medicines/${selectedMedicine.id}`, {
+        method: 'DELETE',
+      });
+      if (res && res.success) {
+        setToast(res.message || `Obat "${selectedMedicine.name}" berhasil dihapus.`);
+        setShowDeleteModal(false);
+        setSelectedMedicine(null);
+        await loadMedicines();
+      } else {
+        setError(res?.error || 'Gagal menghapus obat.');
+      }
+    } catch (err) {
+      console.error('Delete medicine error:', err);
+      setError('Terjadi kendala jaringan saat menghapus obat.');
+    } finally {
+      setSubmitting(false);
+      setTimeout(() => setToast(''), 4000);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -129,6 +172,8 @@ export default function AdminMedicinesPage() {
       const form = new FormData();
       form.append('code', formData.code.trim());
       form.append('name', formData.name.trim());
+      form.append('description', formData.description.trim());
+      form.append('medicine_type', formData.medicine_type);
       form.append('category', formData.category);
       form.append('dosage_form', formData.dosage_form);
       form.append('unit', formData.unit);
@@ -232,25 +277,37 @@ export default function AdminMedicinesPage() {
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
-              placeholder="Cari nama obat, kode, kategori..."
+              placeholder="Cari nama obat, deskripsi, kode, kategori..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </div>
 
-          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={lowStockOnly}
-              onChange={(e) => setLowStockOnly(e.target.checked)}
-              className="w-4 h-4 rounded text-amber-500 focus:ring-amber-400 border-slate-300"
-            />
-            <span className="flex items-center gap-1">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-              Hanya Tampilkan Stok Menipis
-            </span>
-          </label>
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+            >
+              <option value="ALL">Semua Tipe Obat</option>
+              <option value="BIASA">Obat Biasa</option>
+              <option value="KERAS">Obat Keras</option>
+            </select>
+
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={lowStockOnly}
+                onChange={(e) => setLowStockOnly(e.target.checked)}
+                className="w-4 h-4 rounded text-amber-500 focus:ring-amber-400 border-slate-300"
+              />
+              <span className="flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                Hanya Tampilkan Stok Menipis
+              </span>
+            </label>
+          </div>
         </div>
 
         {/* Medicines Table */}
@@ -275,10 +332,10 @@ export default function AdminMedicinesPage() {
               <table className="w-full text-left text-xs text-slate-700">
                 <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-100">
                   <tr>
-                    <th className="py-3 px-4">Kode & Nama Obat</th>
-                    <th className="py-3 px-4">Kategori</th>
-                    <th className="py-3 px-4">Bentuk</th>
-                    <th className="py-3 px-4">Sisa Stok</th>
+                    <th className="py-3 px-4">Kode, Nama & Deskripsi Obat</th>
+                    <th className="py-3 px-4">Tipe Obat</th>
+                    <th className="py-3 px-4">Kategori & Bentuk</th>
+                    <th className="py-3 px-4">Stok</th>
                     <th className="py-3 px-4">Batas Min.</th>
                     <th className="py-3 px-4 text-right">Aksi</th>
                   </tr>
@@ -286,6 +343,7 @@ export default function AdminMedicinesPage() {
                 <tbody className="divide-y divide-slate-100">
                   {medicines.map((med) => {
                     const isLow = (med.stock || 0) <= (med.min_stock || 0);
+                    const isKeras = (med.medicine_type || 'BIASA').toUpperCase() === 'KERAS';
 
                     return (
                       <tr
@@ -294,19 +352,37 @@ export default function AdminMedicinesPage() {
                           isLow ? 'border-l-4 border-l-amber-500 bg-amber-50/20' : ''
                         }`}
                       >
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 max-w-xs">
                           <p className="font-bold text-slate-900 text-xs sm:text-sm">
                             {med.name}
                           </p>
-                          <span className="text-[10px] text-slate-400 font-mono">
+                          <span className="text-[10px] text-slate-400 font-mono block">
                             {med.code}
                           </span>
+                          {med.description && (
+                            <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
+                              {med.description}
+                            </p>
+                          )}
                         </td>
-                        <td className="py-3.5 px-4 font-medium text-slate-600">
-                          {med.category || 'Generik'}
+                        <td className="py-3.5 px-4">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                              isKeras
+                                ? 'bg-red-50 text-red-700 border-red-200'
+                                : 'bg-sky-50 text-sky-700 border-sky-200'
+                            }`}
+                          >
+                            {isKeras ? 'Obat Keras' : 'Obat Biasa'}
+                          </span>
                         </td>
-                        <td className="py-3.5 px-4 text-slate-500">
-                          {med.dosage_form || 'Tablet'}
+                        <td className="py-3.5 px-4">
+                          <p className="font-medium text-slate-700">
+                            {med.category || 'Generik'}
+                          </p>
+                          <span className="text-[11px] text-slate-400">
+                            {med.dosage_form || med.form || 'Tablet'}
+                          </span>
                         </td>
                         <td className="py-3.5 px-4">
                           <span
@@ -343,6 +419,14 @@ export default function AdminMedicinesPage() {
                               title="Edit Data Obat"
                             >
                               <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openDeleteModal(med)}
+                              className="p-1.5 rounded-xl text-slate-500 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              title="Hapus Obat"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </td>
@@ -424,6 +508,33 @@ export default function AdminMedicinesPage() {
                 placeholder="Contoh: Paracetamol 500mg"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
+                Deskripsi Obat
+              </label>
+              <textarea
+                rows={2}
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Indikasi, kegunaan, atau catatan penggunaan obat..."
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
+                Tipe Obat *
+              </label>
+              <select
+                value={formData.medicine_type}
+                onChange={(e) => setFormData({ ...formData, medicine_type: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              >
+                <option value="BIASA">Obat Biasa (Bebas / Bebas Terbatas)</option>
+                <option value="KERAS">Obat Keras (Wajib Resep Dokter)</option>
+              </select>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -580,6 +691,70 @@ export default function AdminMedicinesPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && selectedMedicine && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl animate-scale-up space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <h3 className="font-heading font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-red-600" />
+                <span>Hapus Obat dari Inventori</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-red-50/70 border border-red-100 text-xs space-y-1.5">
+              <p className="font-bold text-slate-900">{selectedMedicine.name}</p>
+              <p className="text-slate-600 font-mono">
+                Kode: {selectedMedicine.code} • Sisa Stok: {selectedMedicine.stock} {selectedMedicine.unit}
+              </p>
+              <p className="text-red-700 pt-1 leading-relaxed">
+                Apakah Anda yakin ingin menghapus obat ini? Jika obat sudah pernah diresepkan, data akan dinonaktifkan agar riwayat medis tetap aman.
+              </p>
+            </div>
+
+            {error && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => setShowDeleteModal(false)}
+                className="py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={handleDeleteConfirm}
+                className="py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {submitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Ya, Hapus</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

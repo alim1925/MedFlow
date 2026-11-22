@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS doctors (
     poli_id UUID REFERENCES polis(id) ON DELETE SET NULL,
     full_name VARCHAR(255) NOT NULL,
     str_number VARCHAR(100) UNIQUE NOT NULL,
+    phone VARCHAR(30),
     bio TEXT,
     photo_url TEXT,
     is_active BOOLEAN DEFAULT TRUE,
@@ -143,6 +144,8 @@ CREATE TABLE IF NOT EXISTS medicines (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
+    description TEXT,
+    medicine_type VARCHAR(20) NOT NULL DEFAULT 'BIASA' CHECK (medicine_type IN ('BIASA', 'KERAS')),
     category VARCHAR(100),
     form VARCHAR(100),
     unit VARCHAR(50) NOT NULL,
@@ -248,6 +251,106 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 4.17 OPERATIONAL REVENUES (Pendapatan Operasional)
+CREATE TABLE IF NOT EXISTS operational_revenues (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reference_no VARCHAR(50),
+    transaction_date DATE NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    description TEXT NOT NULL,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount >= 0),
+    payment_method VARCHAR(30) NOT NULL DEFAULT 'CASH',
+    notes TEXT,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4.18 OPERATIONAL EXPENSES (Pengeluaran Operasional Umum)
+CREATE TABLE IF NOT EXISTS operational_expenses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reference_no VARCHAR(50),
+    transaction_date DATE NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    description TEXT NOT NULL,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount >= 0),
+    vendor VARCHAR(255),
+    notes TEXT,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4.19 STAFF PAYROLLS (Gaji Dokter & Staf)
+CREATE TABLE IF NOT EXISTS staff_payrolls (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    employee_name VARCHAR(255) NOT NULL,
+    doctor_id UUID REFERENCES doctors(id) ON DELETE SET NULL,
+    role_title VARCHAR(100) NOT NULL,
+    period_month VARCHAR(7) NOT NULL,
+    base_salary NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (base_salary >= 0),
+    allowance NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (allowance >= 0),
+    deduction NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (deduction >= 0),
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    paid_at TIMESTAMP,
+    notes TEXT,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4.20 ACCOUNTS RECEIVABLE (Piutang Pasien / BPJS / Asuransi)
+CREATE TABLE IF NOT EXISTS accounts_receivable (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_number VARCHAR(50) UNIQUE NOT NULL,
+    debtor_name VARCHAR(255) NOT NULL,
+    debtor_type VARCHAR(30) NOT NULL DEFAULT 'PATIENT',
+    patient_id UUID REFERENCES patients(id) ON DELETE SET NULL,
+    description TEXT,
+    total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
+    paid_amount NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
+    due_date DATE NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'UNPAID',
+    notes TEXT,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4.21 EQUIPMENT MAINTENANCES (Pemeliharaan Alat Medis)
+CREATE TABLE IF NOT EXISTS equipment_maintenances (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    equipment_code VARCHAR(50) NOT NULL,
+    equipment_name VARCHAR(255) NOT NULL,
+    department VARCHAR(100),
+    maintenance_type VARCHAR(30) NOT NULL DEFAULT 'PREVENTIVE',
+    maintenance_date DATE NOT NULL,
+    next_maintenance_date DATE,
+    vendor_name VARCHAR(255),
+    cost NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (cost >= 0),
+    status VARCHAR(20) NOT NULL DEFAULT 'SCHEDULED',
+    notes TEXT,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4.22 EQUIPMENT DAMAGE REPORTS (Laporan Kerusakan Alat Medis oleh Dokter)
+CREATE TABLE IF NOT EXISTS equipment_damage_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doctor_id UUID REFERENCES doctors(id) ON DELETE CASCADE,
+    maintenance_id UUID REFERENCES equipment_maintenances(id) ON DELETE SET NULL,
+    equipment_code VARCHAR(50) NOT NULL,
+    equipment_name VARCHAR(255) NOT NULL,
+    department VARCHAR(100),
+    severity VARCHAR(20) NOT NULL DEFAULT 'MEDIUM',
+    reported_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    description TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'REPORTED',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 5. Helpful Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_patients_user_id ON patients(user_id);
 CREATE INDEX IF NOT EXISTS idx_patients_med_rec_no ON patients(medical_record_no);
@@ -262,6 +365,11 @@ CREATE INDEX IF NOT EXISTS idx_medical_records_doctor ON medical_records(doctor_
 CREATE INDEX IF NOT EXISTS idx_prescriptions_status ON prescriptions(status);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_medicine ON stock_movements(medicine_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE is_read = FALSE;
+CREATE INDEX IF NOT EXISTS idx_operational_revenues_date ON operational_revenues(transaction_date);
+CREATE INDEX IF NOT EXISTS idx_operational_expenses_date ON operational_expenses(transaction_date);
+CREATE INDEX IF NOT EXISTS idx_staff_payrolls_period ON staff_payrolls(period_month);
+CREATE INDEX IF NOT EXISTS idx_accounts_receivable_due_date ON accounts_receivable(due_date);
+CREATE INDEX IF NOT EXISTS idx_equipment_maintenances_date ON equipment_maintenances(maintenance_date);
 
 -- 6. updated_at Triggers on All Eligible Tables
 DROP TRIGGER IF EXISTS trg_update_users_updated_at ON users;
@@ -293,3 +401,18 @@ CREATE TRIGGER trg_update_prescriptions_updated_at BEFORE UPDATE ON prescription
 
 DROP TRIGGER IF EXISTS trg_update_prescription_items_updated_at ON prescription_items;
 CREATE TRIGGER trg_update_prescription_items_updated_at BEFORE UPDATE ON prescription_items FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trg_update_operational_revenues_updated_at ON operational_revenues;
+CREATE TRIGGER trg_update_operational_revenues_updated_at BEFORE UPDATE ON operational_revenues FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trg_update_operational_expenses_updated_at ON operational_expenses;
+CREATE TRIGGER trg_update_operational_expenses_updated_at BEFORE UPDATE ON operational_expenses FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trg_update_staff_payrolls_updated_at ON staff_payrolls;
+CREATE TRIGGER trg_update_staff_payrolls_updated_at BEFORE UPDATE ON staff_payrolls FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trg_update_accounts_receivable_updated_at ON accounts_receivable;
+CREATE TRIGGER trg_update_accounts_receivable_updated_at BEFORE UPDATE ON accounts_receivable FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trg_update_equipment_maintenances_updated_at ON equipment_maintenances;
+CREATE TRIGGER trg_update_equipment_maintenances_updated_at BEFORE UPDATE ON equipment_maintenances FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

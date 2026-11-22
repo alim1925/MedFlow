@@ -15,8 +15,8 @@ import {
 
 const STATUS_MAP = {
   PENDING: { label: 'Menunggu', icon: Clock, className: 'bg-amber-50 text-amber-700 border-amber-200' },
-  CONFIRMED: { label: 'Dikonfirmasi', icon: CheckCircle, className: 'bg-sky-50 text-sky-700 border-sky-200' },
-  REJECTED: { label: 'Ditolak', icon: XCircle, className: 'bg-red-50 text-red-700 border-red-200' },
+  CONFIRMED: { label: 'Approved', icon: CheckCircle, className: 'bg-sky-50 text-sky-700 border-sky-200' },
+  REJECTED: { label: 'Rejected', icon: XCircle, className: 'bg-red-50 text-red-700 border-red-200' },
   CANCELLED: { label: 'Dibatalkan', icon: Ban, className: 'bg-slate-50 text-slate-500 border-slate-200' },
   COMPLETED: { label: 'Selesai', icon: CheckCircle2, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   NO_SHOW: { label: 'Tidak Hadir', icon: AlertCircle, className: 'bg-orange-50 text-orange-700 border-orange-200' },

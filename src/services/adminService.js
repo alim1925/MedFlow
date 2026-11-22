@@ -3,6 +3,7 @@ import { query, withTransaction } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { poliSchema, medicineSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
+import { transitionAppointmentStatus } from '@/services/appointmentStatusService';
 
 async function requireAdmin() {
   const user = await getCurrentUser();
@@ -520,13 +521,29 @@ export async function toggleDoctorActive(id) {
   }
 }
 
+let medicineColumnsPromise = null;
+
+async function ensureMedicineColumns() {
+  if (!medicineColumnsPromise) {
+    medicineColumnsPromise = query(`
+      ALTER TABLE medicines ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE medicines ADD COLUMN IF NOT EXISTS medicine_type VARCHAR(20) NOT NULL DEFAULT 'BIASA';
+    `).catch((err) => {
+      medicineColumnsPromise = null;
+      throw err;
+    });
+  }
+  return medicineColumnsPromise;
+}
+
 export async function getMedicines() {
   try {
-    const user = await requireAdminOrDoctor();
+    await requireAdminOrDoctor();
+    await ensureMedicineColumns();
 
     const res = await query(
       `SELECT * FROM medicines
-       ${user.role === 'DOCTOR' ? 'WHERE is_active = true' : ''}
+       WHERE is_active = true
        ORDER BY name ASC`
     );
     return {
@@ -541,10 +558,14 @@ export async function getMedicines() {
 export async function createMedicine(input) {
   try {
     const admin = await requireAdmin();
+    await ensureMedicineColumns();
     const raw = normalizeInput(input);
 
+    const normalizedType = String(raw.medicine_type || 'BIASA').toUpperCase();
     const parsedRaw = {
       ...raw,
+      description: raw.description?.trim() || null,
+      medicine_type: normalizedType === 'KERAS' ? 'KERAS' : 'BIASA',
       form: raw.form ?? raw.dosage_form,
       stock: raw.stock !== undefined ? Number(raw.stock) : 0,
       min_stock: raw.min_stock !== undefined ? Number(raw.min_stock) : 0,
@@ -559,14 +580,24 @@ export async function createMedicine(input) {
       };
     }
 
-    const { code, name, category, form, unit, stock, min_stock } = validation.data;
+    const { code, name, description, medicine_type, category, form, unit, stock, min_stock } = validation.data;
 
     const result = await withTransaction(async (client) => {
       const medRes = await client.query(
-        `INSERT INTO medicines (code, name, category, form, unit, stock, min_stock, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+        `INSERT INTO medicines (code, name, description, medicine_type, category, form, unit, stock, min_stock, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
          RETURNING *`,
-        [code.trim(), name.trim(), category || null, form || null, unit.trim(), stock || 0, min_stock || 0]
+        [
+          code.trim(),
+          name.trim(),
+          description?.trim() || null,
+          medicine_type,
+          category || null,
+          form || null,
+          unit.trim(),
+          stock || 0,
+          min_stock || 0,
+        ]
       );
       const newMed = medRes.rows[0];
 
@@ -581,7 +612,16 @@ export async function createMedicine(input) {
       await client.query(
         `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
          VALUES ($1, 'CREATE_MEDICINE', 'medicines', $2, $3)`,
-        [admin.id, newMed.id, JSON.stringify({ name: newMed.name, code: newMed.code, initial_stock: stock })]
+        [
+          admin.id,
+          newMed.id,
+          JSON.stringify({
+            name: newMed.name,
+            code: newMed.code,
+            medicine_type: newMed.medicine_type,
+            initial_stock: stock,
+          }),
+        ]
       );
 
       return newMed;
@@ -602,13 +642,18 @@ export async function createMedicine(input) {
 export async function updateMedicine(id, input) {
   try {
     const admin = await requireAdmin();
+    await ensureMedicineColumns();
     const raw = normalizeInput(input);
 
     const code = raw.code;
     const name = raw.name;
+    const description = raw.description?.trim() || null;
+    const medicine_type = String(raw.medicine_type || 'BIASA').toUpperCase() === 'KERAS' ? 'KERAS' : 'BIASA';
     const category = raw.category;
     const form = raw.form ?? raw.dosage_form;
     const unit = raw.unit;
+    const hasStockInput = raw.stock !== undefined && raw.stock !== '';
+    const parsedStock = hasStockInput ? Number(raw.stock) : undefined;
     const min_stock = raw.min_stock;
 
     if (!code || !name || !unit) {
@@ -619,33 +664,81 @@ export async function updateMedicine(id, input) {
       };
     }
 
-    const res = await query(
-      `UPDATE medicines
-       SET code = $1, name = $2, category = $3, form = $4, unit = $5, min_stock = $6, updated_at = NOW()
-       WHERE id = $7
-       RETURNING *`,
-      [
-        code.trim(),
-        name.trim(),
-        category?.trim() || null,
-        form?.trim() || null,
-        unit.trim(),
-        Number(min_stock) || 0,
-        id,
-      ]
-    );
-
-    if (res.rows.length === 0) {
-      return { success: false, error: 'Obat tidak ditemukan.', status: 404 };
+    if (hasStockInput && (Number.isNaN(parsedStock) || parsedStock < 0)) {
+      return {
+        success: false,
+        error: 'Stok tidak boleh bernilai negatif.',
+        status: 400,
+      };
     }
 
-    const updated = res.rows[0];
+    const updated = await withTransaction(async (client) => {
+      const existingRes = await client.query(
+        'SELECT id, stock FROM medicines WHERE id = $1 FOR UPDATE',
+        [id]
+      );
+      if (existingRes.rows.length === 0) {
+        throw new ServiceError('Obat tidak ditemukan.', 404);
+      }
 
-    await query(
-      `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
-       VALUES ($1, 'UPDATE_MEDICINE', 'medicines', $2, $3)`,
-      [admin.id, updated.id, JSON.stringify({ name: updated.name, code: updated.code })]
-    );
+      const previousStock = Number(existingRes.rows[0].stock) || 0;
+      const nextStock = hasStockInput ? Math.floor(parsedStock) : previousStock;
+
+      const res = await client.query(
+        `UPDATE medicines
+         SET code = $1,
+             name = $2,
+             description = $3,
+             medicine_type = $4,
+             category = $5,
+             form = $6,
+             unit = $7,
+             stock = $8,
+             min_stock = $9,
+             updated_at = NOW()
+         WHERE id = $10
+         RETURNING *`,
+        [
+          code.trim(),
+          name.trim(),
+          description,
+          medicine_type,
+          category?.trim() || null,
+          form?.trim() || null,
+          unit.trim(),
+          nextStock,
+          Number(min_stock) || 0,
+          id,
+        ]
+      );
+
+      const row = res.rows[0];
+
+      if (hasStockInput && nextStock !== previousStock) {
+        await client.query(
+          `INSERT INTO stock_movements (medicine_id, type, quantity, balance_after, created_by)
+           VALUES ($1, 'ADJUSTMENT', $2, $3, $4)`,
+          [id, nextStock - previousStock, nextStock, admin.id]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'UPDATE_MEDICINE', 'medicines', $2, $3)`,
+        [
+          admin.id,
+          row.id,
+          JSON.stringify({
+            name: row.name,
+            code: row.code,
+            medicine_type: row.medicine_type,
+            stock: nextStock,
+          }),
+        ]
+      );
+
+      return row;
+    });
 
     return {
       success: true,
@@ -728,6 +821,108 @@ export async function restockMedicine(medicineId, quantity) {
   }
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function deleteMedicine(medicineId) {
+  try {
+    const admin = await requireAdmin();
+
+    if (!medicineId || !UUID_REGEX.test(medicineId)) {
+      return {
+        success: false,
+        error: 'ID obat tidak valid.',
+        status: 400,
+      };
+    }
+
+    const result = await withTransaction(async (client) => {
+      const medRes = await client.query(
+        'SELECT id, code, name, stock, unit, is_active FROM medicines WHERE id = $1 FOR UPDATE',
+        [medicineId]
+      );
+
+      if (medRes.rows.length === 0) {
+        throw new ServiceError('Obat tidak ditemukan.', 404);
+      }
+
+      const medicine = medRes.rows[0];
+
+      const prescUsageRes = await client.query(
+        'SELECT COUNT(*)::int AS count FROM prescription_items WHERE medicine_id = $1',
+        [medicineId]
+      );
+      const usageCount = prescUsageRes.rows[0]?.count || 0;
+
+      if (usageCount > 0) {
+        // Soft delete: medicine has already been used in prescriptions, preserve medical history
+        await client.query(
+          'UPDATE medicines SET is_active = false, updated_at = NOW() WHERE id = $1',
+          [medicineId]
+        );
+
+        await client.query(
+          `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+           VALUES ($1, 'DELETE_MEDICINE', 'medicines', $2, $3)`,
+          [
+            admin.id,
+            medicine.id,
+            JSON.stringify({
+              mode: 'SOFT_DELETE',
+              code: medicine.code,
+              name: medicine.name,
+              prescription_item_count: usageCount,
+            }),
+          ]
+        );
+
+        return {
+          id: medicine.id,
+          name: medicine.name,
+          code: medicine.code,
+          mode: 'archived',
+        };
+      }
+
+      // Hard delete: no prescription history exists, clean up stock movements then delete medicine
+      await client.query('DELETE FROM stock_movements WHERE medicine_id = $1', [medicineId]);
+      await client.query('DELETE FROM medicines WHERE id = $1', [medicineId]);
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'DELETE_MEDICINE', 'medicines', $2, $3)`,
+        [
+          admin.id,
+          medicine.id,
+          JSON.stringify({
+            mode: 'HARD_DELETE',
+            code: medicine.code,
+            name: medicine.name,
+            previous_stock: medicine.stock,
+          }),
+        ]
+      );
+
+      return {
+        id: medicine.id,
+        name: medicine.name,
+        code: medicine.code,
+        mode: 'deleted',
+      };
+    });
+
+    return {
+      success: true,
+      data: result,
+      message:
+        result.mode === 'archived'
+          ? `Obat "${result.name}" dinonaktifkan dari inventori karena sudah memiliki riwayat resep.`
+          : `Obat "${result.name}" berhasil dihapus permanen.`,
+    };
+  } catch (err) {
+    return toServiceErrorResult('deleteMedicine', err);
+  }
+}
+
 export async function getAllAppointments(filters = {}) {
   try {
     await requireAdmin();
@@ -787,6 +982,26 @@ export async function getAllAppointments(filters = {}) {
     };
   } catch (err) {
     return toServiceErrorResult('getAllAppointments', err);
+  }
+}
+
+export async function updateAppointmentStatusByAdmin(appointmentId, targetStatus, reason = '') {
+  try {
+    const admin = await requireAdmin();
+    const updated = await transitionAppointmentStatus({
+      appointmentId,
+      actorUser: admin,
+      doctorScopeId: null,
+      actorLabel: 'Administrator',
+      targetStatus,
+      reason,
+    });
+    return {
+      success: true,
+      data: updated,
+    };
+  } catch (err) {
+    return toServiceErrorResult('updateAppointmentStatusByAdmin', err);
   }
 }
 

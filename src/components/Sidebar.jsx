@@ -25,6 +25,8 @@ import {
   FileText,
   Bell,
   UserRound,
+  BarChart3,
+  Wrench,
 } from 'lucide-react';
 
 const DOCTOR_NAV_ITEMS = [
@@ -32,6 +34,8 @@ const DOCTOR_NAV_ITEMS = [
   { label: 'Jadwal Saya', href: '/doctor/schedules', icon: Calendar },
   { label: 'Validasi Janji', href: '/doctor/appointments', icon: ClipboardCheck },
   { label: 'Pemeriksaan', href: '/doctor/examinations', icon: Stethoscope },
+  { label: 'Lapor Alat Rusak', href: '/doctor/equipment-reports', icon: Wrench },
+  { label: 'Profil Saya', href: '/doctor/profile', icon: UserRound },
 ];
 
 const ADMIN_NAV_ITEMS = [
@@ -42,6 +46,7 @@ const ADMIN_NAV_ITEMS = [
   { label: 'Obat & Stok', href: '/admin/medicines', icon: Pill },
   { label: 'Farmasi', href: '/admin/pharmacy', icon: ShoppingBag },
   { label: 'Semua Janji', href: '/admin/appointments', icon: CalendarDays },
+  { label: 'Laporan Operasional', href: '/admin/reports', icon: BarChart3 },
   { label: 'Audit Log', href: '/admin/audit-logs', icon: History },
 ];
 

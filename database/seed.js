@@ -221,6 +221,8 @@ async function seed() {
       {
         code: 'MED-001',
         name: 'Paracetamol 500mg',
+        description: 'Pereda demam dan nyeri ringan hingga sedang (sakit kepala, nyeri otot).',
+        medicineType: 'BIASA',
         category: 'Analgesik & Antipiretik',
         form: 'Tablet',
         unit: 'Tablet',
@@ -230,6 +232,8 @@ async function seed() {
       {
         code: 'MED-002',
         name: 'Amoxicillin 500mg',
+        description: 'Antibiotik spektrum luas golongan penisilin untuk infeksi bakteri; wajib resep dokter.',
+        medicineType: 'KERAS',
         category: 'Antibiotik',
         form: 'Kapsul',
         unit: 'Kapsul',
@@ -239,6 +243,8 @@ async function seed() {
       {
         code: 'MED-003',
         name: 'Ibuprofen 400mg',
+        description: 'Obat antiinflamasi non-steroid untuk meredakan nyeri dan peradangan.',
+        medicineType: 'BIASA',
         category: 'Anti-inflamasi Non-Steroid',
         form: 'Tablet',
         unit: 'Tablet',
@@ -248,6 +254,8 @@ async function seed() {
       {
         code: 'MED-004',
         name: 'Omeprazole 20mg',
+        description: 'Penghambat pompa proton untuk terapi tukak lambung dan GERD.',
+        medicineType: 'KERAS',
         category: 'Antasida & PPI',
         form: 'Kapsul',
         unit: 'Kapsul',
@@ -257,6 +265,8 @@ async function seed() {
       {
         code: 'MED-005',
         name: 'Cetirizine 10mg',
+        description: 'Antihistamin untuk meredakan gejala alergi seperti rinitis dan urtikaria.',
+        medicineType: 'BIASA',
         category: 'Antihistamin',
         form: 'Tablet',
         unit: 'Tablet',
@@ -266,6 +276,8 @@ async function seed() {
       {
         code: 'MED-006',
         name: 'Metformin 500mg',
+        description: 'Obat antidiabetes oral lini pertama untuk pengendalian gula darah diabetes tipe 2.',
+        medicineType: 'KERAS',
         category: 'Antidiabetes Oral',
         form: 'Tablet',
         unit: 'Tablet',
@@ -275,6 +287,8 @@ async function seed() {
       {
         code: 'MED-007',
         name: 'Amlodipine 10mg',
+        description: 'Antihipertensi golongan Calcium Channel Blocker untuk tekanan darah tinggi.',
+        medicineType: 'KERAS',
         category: 'Antihipertensi CCB',
         form: 'Tablet',
         unit: 'Tablet',
@@ -284,6 +298,8 @@ async function seed() {
       {
         code: 'MED-008',
         name: 'Captopril 25mg',
+        description: 'ACE inhibitor untuk terapi hipertensi dan gagal jantung; wajib pengawasan dokter.',
+        medicineType: 'KERAS',
         category: 'Antihipertensi ACE-I',
         form: 'Tablet',
         unit: 'Tablet',
@@ -293,6 +309,8 @@ async function seed() {
       {
         code: 'MED-009',
         name: 'Salbutamol 2mg',
+        description: 'Bronkodilator untuk meredakan sesak napas akibat asma atau bronkospasme.',
+        medicineType: 'KERAS',
         category: 'Bronkodilator',
         form: 'Tablet',
         unit: 'Tablet',
@@ -302,6 +320,8 @@ async function seed() {
       {
         code: 'MED-010',
         name: 'Dexamethasone 0.5mg',
+        description: 'Kortikosteroid sistemik untuk reaksi inflamasi berat dan alergi.',
+        medicineType: 'KERAS',
         category: 'Kortikosteroid',
         form: 'Tablet',
         unit: 'Tablet',
@@ -311,6 +331,8 @@ async function seed() {
       {
         code: 'MED-011',
         name: 'Antasida Doen Sirup 60ml',
+        description: 'Menetralkan asam lambung untuk mengatasi maag, mual, dan nyeri ulu hati.',
+        medicineType: 'BIASA',
         category: 'Antasida Lambung',
         form: 'Sirup',
         unit: 'Botol',
@@ -320,6 +342,8 @@ async function seed() {
       {
         code: 'MED-012',
         name: 'Oralit 200ml',
+        description: 'Larutan rehidrasi oral untuk mengganti cairan dan elektrolit saat diare.',
+        medicineType: 'BIASA',
         category: 'Rehidrasi Elektrolit',
         form: 'Serbuk',
         unit: 'Sachet',
@@ -329,6 +353,8 @@ async function seed() {
       {
         code: 'MED-013',
         name: 'Vitamin C 500mg',
+        description: 'Suplemen asam askorbat untuk membantu menjaga daya tahan tubuh.',
+        medicineType: 'BIASA',
         category: 'Suplemen & Vitamin',
         form: 'Tablet',
         unit: 'Tablet',
@@ -338,6 +364,8 @@ async function seed() {
       {
         code: 'MED-014',
         name: 'Ciprofloxacin 500mg',
+        description: 'Antibiotik kuinolon untuk infeksi saluran kemih, pernapasan, dan pencernaan.',
+        medicineType: 'KERAS',
         category: 'Antibiotik Kuinolon',
         form: 'Tablet',
         unit: 'Tablet',
@@ -347,6 +375,8 @@ async function seed() {
       {
         code: 'MED-015',
         name: 'Simvastatin 20mg',
+        description: 'Obat penurun kadar kolesterol LDL dan trigliserida dalam darah.',
+        medicineType: 'KERAS',
         category: 'Hipolipidemik / Kolesterol',
         form: 'Tablet',
         unit: 'Tablet',
@@ -357,12 +387,12 @@ async function seed() {
 
     for (const med of medicinesData) {
       const medRes = await client.query(
-        `INSERT INTO medicines (code, name, category, form, unit, stock, min_stock, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+        `INSERT INTO medicines (code, name, description, medicine_type, category, form, unit, stock, min_stock, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
          ON CONFLICT (code) DO UPDATE SET
-           name = $2, category = $3, form = $4, unit = $5, stock = $6, min_stock = $7, is_active = true
+           name = $2, description = $3, medicine_type = $4, category = $5, form = $6, unit = $7, stock = $8, min_stock = $9, is_active = true
          RETURNING id, stock;`,
-        [med.code, med.name, med.category, med.form, med.unit, med.stock, med.minStock]
+        [med.code, med.name, med.description, med.medicineType, med.category, med.form, med.unit, med.stock, med.minStock]
       );
       const medicineId = medRes.rows[0].id;
 
@@ -377,6 +407,109 @@ async function seed() {
       );
     }
     console.log('✅ 15 Medicines seeded with initial stock movements.');
+
+    // 7b. Seed Operational & Financial Sample Data (if tables are empty)
+    console.log('📊 Seeding sample operational & financial records...');
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const prevDateObj = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    const prevMonth = `${prevDateObj.getFullYear()}-${String(prevDateObj.getMonth() + 1).padStart(2, '0')}`;
+    const mkDate = (ym, day) => `${ym}-${String(day).padStart(2, '0')}`;
+
+    const revCount = await client.query('SELECT COUNT(*)::int AS count FROM operational_revenues');
+    if ((revCount.rows[0]?.count || 0) === 0) {
+      const revenues = [
+        ['REV-2026-001', mkDate(currentMonth, 3), 'POLI_SERVICE', 'Pendapatan Jasa Konsultasi Poli Umum & Spesialis', 28500000, 'TRANSFER', 'Rekap minggu 1'],
+        ['REV-2026-002', mkDate(currentMonth, 8), 'PHARMACY', 'Penjualan Obat Instalasi Farmasi Rawat Jalan', 19400000, 'QRIS', 'Resep pasien umum & BPJS'],
+        ['REV-2026-003', mkDate(currentMonth, 12), 'LABORATORY', 'Layanan Pemeriksaan Laboratorium & Diagnostik', 14250000, 'CASH', 'Paket lab darah & urin'],
+        ['REV-2026-004', mkDate(currentMonth, 18), 'POLI_SERVICE', 'Tindakan Medis Poli Gigi & Penyakit Dalam', 22800000, 'BPJS', 'Klaim layanan rawat jalan'],
+        ['REV-2026-005', mkDate(prevMonth, 14), 'POLI_SERVICE', 'Pendapatan Layanan Poliklinik Bulan Lalu', 41200000, 'TRANSFER', 'Rekap bulanan'],
+        ['REV-2026-006', mkDate(prevMonth, 22), 'PHARMACY', 'Penjualan Resep Obat Farmasi Bulan Lalu', 17600000, 'CASH', 'Rekap farmasi'],
+      ];
+      for (const r of revenues) {
+        await client.query(
+          `INSERT INTO operational_revenues (reference_no, transaction_date, category, description, amount, payment_method, notes, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [...r, adminUserId]
+        );
+      }
+    }
+
+    const expCount = await client.query('SELECT COUNT(*)::int AS count FROM operational_expenses');
+    if ((expCount.rows[0]?.count || 0) === 0) {
+      const expenses = [
+        ['EXP-2026-001', mkDate(currentMonth, 4), 'MEDICINE_PURCHASE', 'Pengadaan Stok Obat & Antibiotik Gudang Farmasi', 12500000, 'PT Kimia Farma Trading', 'Restock rutin bulanan'],
+        ['EXP-2026-002', mkDate(currentMonth, 7), 'UTILITIES', 'Tagihan Listrik, Air PDAM & Internet Rumah Sakit', 4850000, 'PLN & PDAM Kota', 'Tagihan operasional gedung'],
+        ['EXP-2026-003', mkDate(currentMonth, 11), 'MEDICAL_SUPPLIES', 'Pembelian Bahan Medis Habis Pakai (Spuit, Masker, Sarung Tangan)', 3600000, 'PT Medika Sejahtera', 'Kebutuhan poliklinik'],
+        ['EXP-2026-004', mkDate(currentMonth, 16), 'FACILITY', 'Layanan Kebersihan, Laundry Medis & Pengelolaan Limbah B3', 2900000, 'CV Bersih Medika', 'Kontrak bulanan'],
+        ['EXP-2026-005', mkDate(prevMonth, 10), 'MEDICINE_PURCHASE', 'Pengadaan Obat Formularium Bulan Lalu', 11200000, 'PT Enseval Putera', 'Faktur lunas'],
+      ];
+      for (const e of expenses) {
+        await client.query(
+          `INSERT INTO operational_expenses (reference_no, transaction_date, category, description, amount, vendor, notes, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [...e, adminUserId]
+        );
+      }
+    }
+
+    const payCount = await client.query('SELECT COUNT(*)::int AS count FROM staff_payrolls');
+    if ((payCount.rows[0]?.count || 0) === 0) {
+      const payrolls = [
+        ['Dr. Budi Santoso, Sp.PD', 'Dokter Spesialis Penyakit Dalam', currentMonth, 14000000, 4500000, 500000, 'PAID', 'Gaji & jasa medis'],
+        ['Dr. Siti Rahma, Sp.A', 'Dokter Spesialis Anak', currentMonth, 13500000, 3800000, 450000, 'PAID', 'Gaji & jasa medis'],
+        ['Drg. Maya Kartika', 'Dokter Gigi', currentMonth, 9500000, 2500000, 300000, 'PENDING', 'Menunggu pencairan akhir bulan'],
+        ['Apt. Rina Kusuma, S.Farm', 'Kepala Instalasi Farmasi', currentMonth, 6500000, 1200000, 200000, 'PAID', 'Tunjangan profesi apoteker'],
+        ['Ns. Hendri Saputra, S.Kep', 'Koordinator Perawat Poli', currentMonth, 5500000, 1000000, 150000, 'PENDING', 'Jadwal shift rawat jalan'],
+        ['Dr. Budi Santoso, Sp.PD', 'Dokter Spesialis Penyakit Dalam', prevMonth, 14000000, 4200000, 500000, 'PAID', 'Periode bulan lalu'],
+      ];
+      for (const p of payrolls) {
+        await client.query(
+          `INSERT INTO staff_payrolls (employee_name, role_title, period_month, base_salary, allowance, deduction, status, paid_at, notes, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, ${p[6] === 'PAID' ? 'NOW()' : 'NULL'}, $8, $9)`,
+          [p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], adminUserId]
+        );
+      }
+    }
+
+    const recCount = await client.query('SELECT COUNT(*)::int AS count FROM accounts_receivable');
+    if ((recCount.rows[0]?.count || 0) === 0) {
+      const dueFuture = new Date(now.getTime() + 14 * 86400000).toISOString().slice(0, 10);
+      const duePast = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10);
+      const receivables = [
+        ['INV-PIU-2026-001', 'BPJS Kesehatan Cabang Makassar', 'BPJS', 'Klaim pelayanan rawat jalan & obat periode berjalan', 18500000, 10000000, dueFuture, 'PARTIAL', 'Termin 1 sudah cair'],
+        ['INV-PIU-2026-002', 'PT Asuransi Mandiri Medika', 'INSURANCE', 'Tagihan tindakan medis & laboratorium peserta korporat', 7400000, 0, dueFuture, 'UNPAID', 'Menunggu verifikasi berkas'],
+        ['INV-PIU-2026-003', 'Ahmad Fauzi (Pasien Umum)', 'PATIENT', 'Cicilan biaya pemeriksaan diagnostik lanjutan', 2250000, 750000, duePast, 'OVERDUE', 'Perlu pengingat penagihan'],
+        ['INV-PIU-2026-004', 'Klinik Mitra Husada', 'CORPORATE', 'Rujukan pemeriksaan laboratorium kerjasama', 4500000, 4500000, duePast, 'PAID', 'Lunas via transfer bank'],
+      ];
+      for (const rec of receivables) {
+        await client.query(
+          `INSERT INTO accounts_receivable (invoice_number, debtor_name, debtor_type, description, total_amount, paid_amount, due_date, status, notes, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (invoice_number) DO NOTHING`,
+          [...rec, adminUserId]
+        );
+      }
+    }
+
+    const maintCount = await client.query('SELECT COUNT(*)::int AS count FROM equipment_maintenances');
+    if ((maintCount.rows[0]?.count || 0) === 0) {
+      const nextSixMonths = new Date(now.getFullYear(), now.getMonth() + 6, 15).toISOString().slice(0, 10);
+      const maints = [
+        ['ALT-RAD-01', 'Mesin USG 4D Mindray DC-70', 'Poli Penyakit Dalam', 'CALIBRATION', mkDate(currentMonth, 6), nextSixMonths, 'PT Global Medika Teknik', 2400000, 'COMPLETED', 'Kalibrasi tahunan sensor & probe'],
+        ['ALT-GIG-02', 'Dental Unit Gnatus S300', 'Poli Gigi & Mulut', 'REPAIR', mkDate(currentMonth, 14), nextSixMonths, 'CV Karya Dental Servis', 1850000, 'COMPLETED', 'Penggantian selang suction & handpiece'],
+        ['ALT-LAB-03', 'Hematology Analyzer Sysmex XN', 'Laboratorium', 'PREVENTIVE', mkDate(currentMonth, 24), nextSixMonths, 'PT Sysmex Indonesia', 1500000, 'SCHEDULED', 'Pembersihan optik & kontrol reagen'],
+        ['ALT-MAT-04', 'Slit Lamp Biomicroscope Topcon', 'Poli Mata', 'CALIBRATION', mkDate(prevMonth, 19), nextSixMonths, 'PT Optik Medis Nusantara', 1200000, 'COMPLETED', 'Kalibrasi lensa okuler'],
+      ];
+      for (const m of maints) {
+        await client.query(
+          `INSERT INTO equipment_maintenances (equipment_code, equipment_name, department, maintenance_type, maintenance_date, next_maintenance_date, vendor_name, cost, status, notes, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [...m, adminUserId]
+        );
+      }
+    }
+    console.log('✅ Operational & financial sample records seeded.');
 
     // 8. COMMIT Transaction
     await client.query('COMMIT');

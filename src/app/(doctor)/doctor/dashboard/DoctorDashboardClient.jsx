@@ -256,7 +256,7 @@ export default function DoctorDashboardClient({ initialPending = [], initialToda
                         onClick={() => setRejectId(item.id)}
                         className="py-1.5 px-3 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-semibold transition cursor-pointer"
                       >
-                        Tolak
+                        Rejected
                       </button>
                       <button
                         type="button"
@@ -269,7 +269,7 @@ export default function DoctorDashboardClient({ initialPending = [], initialToda
                         ) : (
                           <>
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Terima & Beri Antrean</span>
+                            <span>Approved</span>
                           </>
                         )}
                       </button>

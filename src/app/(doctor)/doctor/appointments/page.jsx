@@ -44,8 +44,8 @@ function formatDateIndo(dateStr) {
 }
 
 export default function DoctorAppointmentsPage() {
-  const [activeTab, setActiveTab] = useState('PENDING'); // PENDING | CONFIRMED
-  const [pendingList, setPendingList] = useState([]);
+  const [activeTab, setActiveTab] = useState('PENDING'); // PENDING | CONFIRMED | REJECTED
+  const [allAppointments, setAllAppointments] = useState([]);
   const [confirmedToday, setConfirmedToday] = useState([]);
   const [doctor, setDoctor] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -60,18 +60,22 @@ export default function DoctorAppointmentsPage() {
   const [toast, setToast] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+  const pendingList = allAppointments.filter((a) => a.status === 'PENDING');
+  const approvedList = allAppointments.filter((a) => a.status === 'CONFIRMED');
+  const rejectedList = allAppointments.filter((a) => a.status === 'REJECTED');
+
   const refreshData = async () => {
     try {
-      const [pendingRes, todayRes, docRes] = await Promise.all([
-        apiRequest('/api/doctor/appointments/pending'),
+      const [allRes, todayRes, docRes] = await Promise.all([
+        apiRequest('/api/doctor/appointments'),
         apiRequest('/api/doctor/appointments/today'),
         apiRequest('/api/doctor/profile'),
       ]);
 
-      if (pendingRes?.success && Array.isArray(pendingRes.data)) {
-        setPendingList(pendingRes.data);
-      } else if (pendingRes?.error) {
-        setErrorMessage(pendingRes.error);
+      if (allRes?.success && Array.isArray(allRes.data)) {
+        setAllAppointments(allRes.data);
+      } else if (allRes?.error) {
+        setErrorMessage(allRes.error);
       }
       if (todayRes?.success && Array.isArray(todayRes.data)) {
         setConfirmedToday(todayRes.data.filter((a) => a.status === 'CONFIRMED'));
@@ -91,16 +95,16 @@ export default function DoctorAppointmentsPage() {
     let cancelled = false;
     async function init() {
       try {
-        const [pendingRes, todayRes, docRes] = await Promise.all([
-          apiRequest('/api/doctor/appointments/pending'),
+        const [allRes, todayRes, docRes] = await Promise.all([
+          apiRequest('/api/doctor/appointments'),
           apiRequest('/api/doctor/appointments/today'),
           apiRequest('/api/doctor/profile'),
         ]);
         if (cancelled) return;
-        if (pendingRes?.success && Array.isArray(pendingRes.data)) {
-          setPendingList(pendingRes.data);
-        } else if (pendingRes?.error) {
-          setErrorMessage(pendingRes.error);
+        if (allRes?.success && Array.isArray(allRes.data)) {
+          setAllAppointments(allRes.data);
+        } else if (allRes?.error) {
+          setErrorMessage(allRes.error);
         }
         if (todayRes?.success && Array.isArray(todayRes.data)) {
           setConfirmedToday(todayRes.data.filter((a) => a.status === 'CONFIRMED'));
@@ -127,18 +131,19 @@ export default function DoctorAppointmentsPage() {
     setActionLoadingId(id);
     setErrorMessage('');
     try {
-      const res = await apiRequest(`/api/doctor/appointments/${id}/confirm`, {
+      const res = await apiRequest(`/api/doctor/appointments/${id}`, {
         method: 'PATCH',
+        body: { status: 'APPROVED' },
       });
       if (res && res.success) {
-        setToast('Janji temu berhasil diterima dan nomor antrean telah diterbitkan.');
+        setToast(`Janji temu berhasil diubah menjadi Approved (Antrean #${res.data?.queue_no || '-'}).`);
         await refreshData();
       } else {
-        setErrorMessage(res?.error || 'Gagal mengonfirmasi janji.');
+        setErrorMessage(res?.error || 'Gagal menyetujui janji.');
       }
     } catch (err) {
       console.error('Confirm error:', err);
-      setErrorMessage('Terjadi kesalahan saat mengonfirmasi janji temu.');
+      setErrorMessage('Terjadi kesalahan saat menyetujui janji temu.');
     } finally {
       setActionLoadingId(null);
       setTimeout(() => setToast(''), 4000);
@@ -152,12 +157,12 @@ export default function DoctorAppointmentsPage() {
     setRejecting(true);
     setErrorMessage('');
     try {
-      const res = await apiRequest(`/api/doctor/appointments/${rejectId}/reject`, {
+      const res = await apiRequest(`/api/doctor/appointments/${rejectId}`, {
         method: 'PATCH',
-        body: { reason: rejectReason.trim() },
+        body: { status: 'REJECTED', reason: rejectReason.trim() },
       });
       if (res && res.success) {
-        setToast('Permohonan janji temu berhasil ditolak.');
+        setToast('Status janji temu berhasil diubah menjadi Rejected.');
         setRejectId(null);
         setRejectReason('');
         await refreshData();
@@ -194,28 +199,39 @@ export default function DoctorAppointmentsPage() {
           </div>
 
           {/* Tab Selector */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-xl w-fit">
+          <div className="flex flex-wrap items-center p-1 bg-slate-100 rounded-xl w-fit gap-1">
             <button
               type="button"
               onClick={() => setActiveTab('PENDING')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'PENDING'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Menunggu Validasi ({pendingList.length})
+              Menunggu ({pendingList.length})
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('CONFIRMED')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'CONFIRMED'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Jadwal Hari Ini ({confirmedToday.length})
+              Approved ({approvedList.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('REJECTED')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'REJECTED'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Rejected ({rejectedList.length})
             </button>
           </div>
         </div>
@@ -318,11 +334,14 @@ export default function DoctorAppointmentsPage() {
                         <button
                           type="button"
                           disabled={isLoading}
-                          onClick={() => setRejectId(item.id)}
+                          onClick={() => {
+                            setRejectReason('');
+                            setRejectId(item.id);
+                          }}
                           className="py-2 px-3.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
                         >
                           <XCircle className="w-3.5 h-3.5" />
-                          <span>Tolak</span>
+                          <span>Rejected</span>
                         </button>
 
                         <button
@@ -336,7 +355,7 @@ export default function DoctorAppointmentsPage() {
                           ) : (
                             <>
                               <CheckCircle2 className="w-4 h-4" />
-                              <span>Terima & Beri Nomor Antrean</span>
+                              <span>Approved</span>
                             </>
                           )}
                         </button>
@@ -349,74 +368,155 @@ export default function DoctorAppointmentsPage() {
           </div>
         )}
 
-        {/* Tab 2: CONFIRMED TODAY */}
+        {/* Tab 2: APPROVED */}
         {activeTab === 'CONFIRMED' && (
           <div className="space-y-4">
-            {confirmedToday.length === 0 ? (
+            {approvedList.length === 0 ? (
               <div className="bg-white rounded-2xl p-12 border border-slate-100 shadow-sm text-center">
                 <Clock className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                 <p className="text-sm font-heading font-bold text-slate-800">
-                  Belum Ada Pasien Terjadwal Hari Ini
+                  Belum Ada Janji Temu Approved
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
-                  Pasien yang telah disetujui akan muncul dalam antrean konsultasi hari ini.
+                  Pasien yang telah disetujui (Approved) akan muncul di daftar ini ({confirmedToday.length} pasien jadwal hari ini).
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
-                {confirmedToday.map((appt) => (
-                  <div
-                    key={appt.id}
-                    className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex items-center justify-between gap-4 hover:border-sky-200 transition"
-                  >
-                    <div className="flex items-center gap-4 min-w-0">
-                      {/* Big Queue Badge */}
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-sky-600 text-white flex flex-col items-center justify-center font-heading font-extrabold flex-shrink-0 shadow-sm">
-                        <span className="text-[10px] uppercase font-bold tracking-wider leading-none text-sky-200">
-                          Antrean
-                        </span>
-                        <span className="text-xl leading-none mt-1">
-                          #{appt.queue_no || '-'}
-                        </span>
+                {approvedList.map((appt) => {
+                  const isLoading = actionLoadingId === appt.id;
+                  return (
+                    <div
+                      key={appt.id}
+                      className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-sky-200 transition"
+                    >
+                      <div className="flex items-center gap-4 min-w-0">
+                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-sky-600 text-white flex flex-col items-center justify-center font-heading font-extrabold flex-shrink-0 shadow-sm">
+                          <span className="text-[10px] uppercase font-bold tracking-wider leading-none text-sky-200">
+                            Antrean
+                          </span>
+                          <span className="text-xl leading-none mt-1">
+                            #{appt.queue_no || '-'}
+                          </span>
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-heading font-bold text-base text-slate-900 truncate">
+                              {appt.patient_name || appt.full_name}
+                            </h3>
+                            <StatusBadge status={appt.status} size="sm" />
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 flex-wrap">
+                            <span className="font-mono text-slate-600 font-semibold">
+                              RM: {appt.medical_record_no}
+                            </span>
+                            <span>•</span>
+                            <span>{formatDateIndo(appt.appointment_date)}</span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 font-medium text-slate-700">
+                              <Clock className="w-3.5 h-3.5 text-sky-500" />
+                              {appt.slot_start?.substring(0, 5)} WIB
+                            </span>
+                          </div>
+                          {appt.complaint && (
+                            <p className="text-xs text-slate-500 italic mt-1.5 truncate">
+                              &ldquo;{appt.complaint}&rdquo;
+                            </p>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-heading font-bold text-base text-slate-900 truncate">
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          onClick={() => {
+                            setRejectReason('');
+                            setRejectId(appt.id);
+                          }}
+                          className="inline-flex items-center gap-1 py-2.5 px-3.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 font-semibold text-xs transition cursor-pointer"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          <span>Rejected</span>
+                        </button>
+                        <Link
+                          href={`/doctor/exam/${appt.id}`}
+                          className="inline-flex items-center gap-1.5 py-2.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-semibold text-xs shadow-sm transition"
+                        >
+                          <Stethoscope className="w-4 h-4" />
+                          <span>Periksa Pasien</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: REJECTED */}
+        {activeTab === 'REJECTED' && (
+          <div className="space-y-4">
+            {rejectedList.length === 0 ? (
+              <div className="bg-white rounded-2xl p-12 border border-slate-100 shadow-sm text-center">
+                <XCircle className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm font-heading font-bold text-slate-800">
+                  Tidak Ada Janji Temu Berstatus Rejected
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Janji temu yang ditolak beserta alasannya akan tampil di sini.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {rejectedList.map((appt) => {
+                  const isLoading = actionLoadingId === appt.id;
+                  return (
+                    <div
+                      key={appt.id}
+                      className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-heading font-bold text-base text-slate-900">
                             {appt.patient_name || appt.full_name}
                           </h3>
                           <StatusBadge status={appt.status} size="sm" />
                         </div>
-                        <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
-                          <span className="font-mono text-slate-600 font-semibold">
-                            RM: {appt.medical_record_no}
-                          </span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1 font-medium text-slate-700">
-                            <Clock className="w-3.5 h-3.5 text-sky-500" />
-                            {appt.slot_start?.substring(0, 5)} WIB
-                          </span>
-                        </div>
-                        {appt.complaint && (
-                          <p className="text-xs text-slate-500 italic mt-1.5 truncate">
-                            &ldquo;{appt.complaint}&rdquo;
+                        <p className="text-xs text-slate-500">
+                          RM: <span className="font-mono">{appt.medical_record_no}</span> •{' '}
+                          {formatDateIndo(appt.appointment_date)} • {appt.slot_start?.substring(0, 5)} WIB
+                        </p>
+                        {appt.rejection_reason && (
+                          <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2 mt-1">
+                            <strong>Alasan Penolakan:</strong> {appt.rejection_reason}
                           </p>
                         )}
                       </div>
-                    </div>
 
-                    <div className="flex-shrink-0">
-                      <Link
-                        href={`/doctor/exam/${appt.id}`}
-                        className="inline-flex items-center gap-1.5 py-2.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-semibold text-xs shadow-sm transition"
-                      >
-                        <Stethoscope className="w-4 h-4" />
-                        <span>Periksa Pasien</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </Link>
+                      <div className="flex-shrink-0">
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          onClick={() => handleConfirm(appt.id)}
+                          className="inline-flex items-center gap-1.5 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm transition cursor-pointer disabled:opacity-50"
+                        >
+                          {isLoading ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>Ubah ke Approved</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

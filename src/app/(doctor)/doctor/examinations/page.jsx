@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getMyExaminations, getDoctorProfile } from '@/services/doctorService';
 import { getCurrentUser } from '@/lib/auth';
 import Sidebar from '@/components/Sidebar';
+import MedicalRecordActions from '@/components/MedicalRecordActions';
 import { CalendarDays, ClipboardList, FileText } from 'lucide-react';
 
 export const metadata = {
@@ -115,13 +116,16 @@ export default async function DoctorExaminationsPage() {
                       {exam.slot_start && ` · ${String(exam.slot_start).slice(0, 5)} WIB`}
                     </p>
                   </div>
-                  <Link
-                    href={`/doctor/exam/${exam.appointment_id}`}
-                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
-                  >
-                    <FileText className="h-4 w-4" />
-                    Lihat rekam medis
-                  </Link>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <MedicalRecordActions recordId={exam.id} size="xs" />
+                    <Link
+                      href={`/doctor/exam/${exam.appointment_id}`}
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-1.5 text-xs font-medium text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      Lihat rekam medis
+                    </Link>
+                  </div>
                 </article>
               ))}
             </div>

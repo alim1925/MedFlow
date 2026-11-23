@@ -1,5 +1,6 @@
 import { getMyPrescriptions } from '@/services/patientService';
 import StatusBadge from '@/components/StatusBadge';
+import MedicalRecordActions from '@/components/MedicalRecordActions';
 import {
   Pill,
   CheckCircle2,
@@ -221,6 +222,15 @@ export default async function PatientPrescriptionsPage() {
                       <strong className="font-semibold text-slate-700">Catatan Apoteker: </strong>
                       {rx.notes}
                     </p>
+                  </div>
+                )}
+
+                {rx.medical_record_id && (
+                  <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-slate-500">
+                      Dokumen Bukti Konsultasi & Resep:
+                    </span>
+                    <MedicalRecordActions recordId={rx.medical_record_id} size="xs" />
                   </div>
                 )}
               </div>

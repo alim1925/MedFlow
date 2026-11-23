@@ -1,19 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import MedicalRecordActions from '@/components/MedicalRecordActions';
+import { getPrescriptionStatusLabel } from '@/lib/medicalRecordPdf';
 import {
   Calendar,
-  User,
   ChevronDown,
-  Activity,
-  FileText,
-  Clock,
   ShieldAlert,
   Stethoscope,
   HeartPulse,
-  Thermometer,
-  Weight,
-  Sparkles
+  Pill,
 } from 'lucide-react';
 
 function formatDateIndo(dateStr) {
@@ -65,6 +61,8 @@ export default function RecordsList({ records = [] }) {
         const isExpanded = expandedIds.includes(rec.id);
         const vital = rec.vital_signs || {};
         const addenda = rec.addenda || [];
+        const prescription = rec.prescription || null;
+        const prescriptionItems = prescription?.items || [];
 
         return (
           <div
@@ -72,37 +70,43 @@ export default function RecordsList({ records = [] }) {
             className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden transition-all duration-200"
           >
             {/* Always-Visible Card Header */}
-            <button
-              type="button"
-              onClick={() => toggleExpand(rec.id)}
-              className="w-full p-5 text-left flex items-start justify-between gap-3 hover:bg-slate-50/70 transition cursor-pointer"
-            >
-              <div className="space-y-1.5 flex-1 min-w-0">
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <Calendar className="w-3.5 h-3.5 text-sky-500 flex-shrink-0" />
-                  <span>{formatDateIndo(rec.created_at || rec.appointment_date)}</span>
-                  <span className="text-slate-300">•</span>
-                  <span className="font-semibold text-sky-700">{rec.poli_name || 'Poli'}</span>
+            <div className="p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => toggleExpand(rec.id)}
+                className="flex-1 min-w-0 text-left flex items-start justify-between gap-3 hover:opacity-90 transition cursor-pointer"
+              >
+                <div className="space-y-1.5 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <Calendar className="w-3.5 h-3.5 text-sky-500 flex-shrink-0" />
+                    <span>{formatDateIndo(rec.created_at || rec.appointment_date)}</span>
+                    <span className="text-slate-300">•</span>
+                    <span className="font-semibold text-sky-700">{rec.poli_name || 'Poli'}</span>
+                  </div>
+
+                  <h3 className="font-heading font-bold text-base text-slate-900 leading-snug">
+                    {rec.diagnosis || 'Pemeriksaan Klinis'}
+                  </h3>
+
+                  <p className="text-xs text-slate-600 flex items-center gap-1.5 font-medium">
+                    <Stethoscope className="w-3.5 h-3.5 text-sky-600" />
+                    <span>{rec.doctor_name || 'Dokter Spesialis'}</span>
+                  </p>
                 </div>
 
-                <h3 className="font-heading font-bold text-base text-slate-900 leading-snug">
-                  {rec.diagnosis || 'Pemeriksaan Klinis'}
-                </h3>
+                <div
+                  className={`w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center transition-transform duration-200 flex-shrink-0 mt-1 ${
+                    isExpanded ? 'rotate-180 bg-sky-100 text-sky-600' : ''
+                  }`}
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </div>
+              </button>
 
-                <p className="text-xs text-slate-600 flex items-center gap-1.5 font-medium">
-                  <Stethoscope className="w-3.5 h-3.5 text-sky-600" />
-                  <span>{rec.doctor_name || 'Dokter Spesialis'}</span>
-                </p>
+              <div className="flex items-center gap-2 shrink-0 sm:pt-0.5">
+                <MedicalRecordActions recordId={rec.id} recordData={rec} size="xs" />
               </div>
-
-              <div
-                className={`w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center transition-transform duration-200 flex-shrink-0 mt-1 ${
-                  isExpanded ? 'rotate-180 bg-sky-100 text-sky-600' : ''
-                }`}
-              >
-                <ChevronDown className="w-4 h-4" />
-              </div>
-            </button>
+            </div>
 
             {/* Expandable Content Area */}
             {isExpanded && (
@@ -195,6 +199,43 @@ export default function RecordsList({ records = [] }) {
                     </div>
                   )}
                 </div>
+
+                {/* Prescription Items (if any) */}
+                {prescription && (
+                  <div className="pt-3 border-t border-slate-100">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <h5 className="text-[11px] font-heading font-bold text-purple-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Pill className="w-3.5 h-3.5 text-purple-600" />
+                        <span>Rincian Resep Obat</span>
+                      </h5>
+                      <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-100 text-[10px] font-semibold">
+                        {getPrescriptionStatusLabel(prescription.status)}
+                      </span>
+                    </div>
+                    {prescriptionItems.length === 0 ? (
+                      <p className="text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        Tidak ada item obat dalam resep ini.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {prescriptionItems.map((it, idx) => (
+                          <div
+                            key={it.id || idx}
+                            className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100 flex flex-wrap items-center justify-between gap-2"
+                          >
+                            <span className="font-bold text-purple-900">
+                              {it.medicine_name || it.name} ({it.quantity} {it.unit || 'unit'})
+                            </span>
+                            <span className="text-slate-600">
+                              {it.dosage_rule}
+                              {it.duration_days ? ` • ${it.duration_days} hari` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Addenda List (if any) */}
                 {addenda.length > 0 && (

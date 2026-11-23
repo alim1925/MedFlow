@@ -3,6 +3,7 @@
 import { use, useState, useEffect, useCallback } from 'react';
 import Sidebar from '@/components/Sidebar';
 import StatusBadge from '@/components/StatusBadge';
+import MedicalRecordActions from '@/components/MedicalRecordActions';
 import { apiRequest } from '@/lib/apiClient';
 import {
   User,
@@ -344,6 +345,26 @@ export default function ExamPage({ params }) {
   }
   const existingAddenda = appointment.addenda || existingRecord.addenda || [];
   const existingPrescription = appointment.prescription;
+  const printableRecordData = hasMedicalRecord
+    ? {
+        ...existingRecord,
+        appointment_date: appointment.appointment_date,
+        slot_start: appointment.slot_start,
+        queue_no: appointment.queue_no,
+        poli_name: appointment.poli_name,
+        doctor_name: appointment.doctor_name || doctor?.full_name,
+        doctor_str_number: appointment.doctor_str_number || doctor?.str_number,
+        patient_name: patient.full_name || appointment.patient_name,
+        medical_record_no: patient.medical_record_no || appointment.medical_record_no,
+        patient_birth_date: patient.birth_date,
+        patient_gender: patient.gender,
+        patient_blood_type: patient.blood_type,
+        patient_phone: patient.patient_phone || patient.phone,
+        patient_allergies: patient.allergies,
+        addenda: existingAddenda,
+        prescription: existingPrescription,
+      }
+    : null;
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 font-sans md:flex-row">
@@ -479,9 +500,9 @@ export default function ExamPage({ params }) {
               /* READ-ONLY RECORD VIEW (COMPLETED) */
               <div className="space-y-6 animate-fade-in">
                 {/* Immutability Banner */}
-                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between text-emerald-900">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-emerald-900">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
                       <Lock className="w-5 h-5" />
                     </div>
                     <div>
@@ -493,9 +514,16 @@ export default function ExamPage({ params }) {
                       </p>
                     </div>
                   </div>
-                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
-                    COMPLETED
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <MedicalRecordActions
+                      recordId={existingRecord.id}
+                      recordData={printableRecordData}
+                      size="xs"
+                    />
+                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                      COMPLETED
+                    </span>
+                  </div>
                 </div>
 
                 {/* Main Medical Record Card */}

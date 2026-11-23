@@ -27,12 +27,17 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isRegistered = searchParams.get('registered') === 'true';
+  const isPasswordReset = searchParams.get('reset') === 'true';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  const forgotPasswordHref = email.trim()
+    ? `/forgot-password?email=${encodeURIComponent(email.trim())}`
+    : '/forgot-password';
 
   const performLogin = async (formData) => {
     setError('');
@@ -187,6 +192,19 @@ function LoginForm() {
             </div>
           )}
 
+          {/* Success Banner if redirected from password reset */}
+          {isPasswordReset && (
+            <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm flex items-start gap-3 animate-fade-in">
+              <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Kata Sandi Berhasil Diperbarui!</p>
+                <p className="text-emerald-700 mt-0.5">
+                  Silakan masuk menggunakan email dan kata sandi baru Anda.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Error Banner */}
           {error && (
             <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs sm:text-sm flex items-start gap-3 animate-fade-in">
@@ -225,9 +243,12 @@ function LoginForm() {
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
                   Kata Sandi
                 </label>
-                <span className="text-xs text-sky-600 hover:text-sky-700 cursor-pointer">
+                <Link
+                  href={forgotPasswordHref}
+                  className="text-xs font-medium text-sky-600 hover:text-sky-700 hover:underline underline-offset-4 transition"
+                >
                   Lupa sandi?
-                </span>
+                </Link>
               </div>
               <div className="relative">
                 <Lock className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />

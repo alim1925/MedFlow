@@ -28,7 +28,10 @@ export async function proxy(request) {
   }
 
   // 1. Redirect authenticated users away from auth pages to their dashboard
-  const isAuthRoute = pathname === '/login' || pathname === '/register';
+  const isAuthRoute =
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password';
   if (isAuthRoute && session?.role) {
     const destination = ROLE_DASHBOARDS[session.role] || '/';
     return NextResponse.redirect(new URL(destination, request.url));
@@ -38,8 +41,10 @@ export async function proxy(request) {
   const isPatientRoute = pathname === '/patient' || pathname.startsWith('/patient/');
   const isDoctorRoute = pathname === '/doctor' || pathname.startsWith('/doctor/');
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/');
+  const isSharedMedicalRecordRoute =
+    pathname === '/medical-records' || pathname.startsWith('/medical-records/');
 
-  if (isPatientRoute || isDoctorRoute || isAdminRoute) {
+  if (isPatientRoute || isDoctorRoute || isAdminRoute || isSharedMedicalRecordRoute) {
     if (!session) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);

@@ -351,6 +351,16 @@ CREATE TABLE IF NOT EXISTS equipment_damage_reports (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 4.23 PASSWORD RESET TOKENS
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) UNIQUE NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    used_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 5. Helpful Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_patients_user_id ON patients(user_id);
 CREATE INDEX IF NOT EXISTS idx_patients_med_rec_no ON patients(medical_record_no);
@@ -370,6 +380,8 @@ CREATE INDEX IF NOT EXISTS idx_operational_expenses_date ON operational_expenses
 CREATE INDEX IF NOT EXISTS idx_staff_payrolls_period ON staff_payrolls(period_month);
 CREATE INDEX IF NOT EXISTS idx_accounts_receivable_due_date ON accounts_receivable(due_date);
 CREATE INDEX IF NOT EXISTS idx_equipment_maintenances_date ON equipment_maintenances(maintenance_date);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at);
 
 -- 6. updated_at Triggers on All Eligible Tables
 DROP TRIGGER IF EXISTS trg_update_users_updated_at ON users;

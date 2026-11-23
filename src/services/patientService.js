@@ -568,9 +568,11 @@ export async function getMyMedicalRecords() {
       `SELECT 
          mr.*,
          d.full_name AS doctor_name,
+         d.str_number AS doctor_str_number,
          pol.name AS poli_name,
          a.appointment_date,
-         a.slot_start
+         a.slot_start,
+         a.queue_no
        FROM medical_records mr
        JOIN doctors d ON mr.doctor_id = d.id
        JOIN polis pol ON d.poli_id = pol.id
@@ -587,14 +589,50 @@ export async function getMyMedicalRecords() {
     }
 
     const recordIds = records.map((r) => r.id);
-    const addendaRes = await query(
-      `SELECT mra.*, d.full_name AS doctor_name
-       FROM medical_record_addenda mra
-       JOIN doctors d ON mra.doctor_id = d.id
-       WHERE mra.medical_record_id = ANY($1)
-       ORDER BY mra.created_at ASC`,
-      [recordIds]
-    );
+    const [addendaRes, prescRes] = await Promise.all([
+      query(
+        `SELECT mra.*, d.full_name AS doctor_name
+         FROM medical_record_addenda mra
+         JOIN doctors d ON mra.doctor_id = d.id
+         WHERE mra.medical_record_id = ANY($1)
+         ORDER BY mra.created_at ASC`,
+        [recordIds]
+      ),
+      query(
+        `SELECT
+           pr.id,
+           pr.medical_record_id,
+           pr.status,
+           pr.notes,
+           pr.ready_at,
+           pr.picked_up_at,
+           pr.created_at,
+           COALESCE(
+             json_agg(
+               json_build_object(
+                 'id', pi.id,
+                 'medicine_id', pi.medicine_id,
+                 'medicine_name', m.name,
+                 'medicine_code', m.code,
+                 'form', m.form,
+                 'unit', m.unit,
+                 'quantity', pi.quantity,
+                 'dosage_rule', pi.dosage_rule,
+                 'duration_days', pi.duration_days
+               )
+               ORDER BY pi.created_at ASC
+             ) FILTER (WHERE pi.id IS NOT NULL),
+             '[]'::json
+           ) AS items
+         FROM prescriptions pr
+         LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
+         LEFT JOIN medicines m ON pi.medicine_id = m.id
+         WHERE pr.medical_record_id = ANY($1)
+         GROUP BY pr.id
+         ORDER BY pr.created_at DESC`,
+        [recordIds]
+      ),
+    ]);
 
     const addendaByRecord = {};
     for (const addendum of addendaRes.rows) {
@@ -604,9 +642,24 @@ export async function getMyMedicalRecords() {
       addendaByRecord[addendum.medical_record_id].push(addendum);
     }
 
+    const prescriptionByRecord = {};
+    for (const presc of prescRes.rows) {
+      if (!prescriptionByRecord[presc.medical_record_id]) {
+        prescriptionByRecord[presc.medical_record_id] = presc;
+      }
+    }
+
     const fullRecords = records.map((rec) => ({
       ...rec,
+      patient_name: patient.full_name,
+      medical_record_no: patient.medical_record_no,
+      patient_birth_date: patient.birth_date,
+      patient_gender: patient.gender,
+      patient_blood_type: patient.blood_type,
+      patient_phone: patient.phone,
+      patient_allergies: patient.allergies,
       addenda: addendaByRecord[rec.id] || [],
+      prescription: prescriptionByRecord[rec.id] || null,
     }));
 
     return {
@@ -625,6 +678,7 @@ export async function getMyPrescriptions() {
     const res = await query(
       `SELECT 
          pr.id,
+         pr.medical_record_id,
          pr.status,
          pr.ready_at,
          pr.picked_up_at,
@@ -653,7 +707,7 @@ export async function getMyPrescriptions() {
        LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
        LEFT JOIN medicines m ON pi.medicine_id = m.id
        WHERE mr.patient_id = $1
-       GROUP BY pr.id, mr.diagnosis, d.full_name, pol.name
+       GROUP BY pr.id, mr.id, mr.diagnosis, d.full_name, pol.name
        ORDER BY pr.created_at DESC`,
       [patient.id]
     );

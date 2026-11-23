@@ -9,6 +9,21 @@ export const loginSchema = z.object({
   password: z.string().min(6, 'Password minimal 6 karakter'),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email('Format email tidak valid'),
+});
+
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().trim().min(1, 'Token reset kata sandi tidak valid'),
+    password: z.string().min(8, 'Kata sandi baru minimal 8 karakter'),
+    confirmPassword: z.string().min(1, 'Konfirmasi kata sandi wajib diisi'),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Konfirmasi kata sandi tidak cocok',
+    path: ['confirmPassword'],
+  });
+
 export const registerSchema = z.object({
   email: z.string().trim().email('Format email tidak valid'),
   password: z.string().min(6, 'Password minimal 6 karakter'),

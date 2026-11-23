@@ -532,6 +532,7 @@ export async function getAppointmentWithPatient(appointmentId) {
          p.emergency_contact,
          p.allergies,
          d.full_name AS doctor_name,
+         d.str_number AS doctor_str_number,
          pol.name AS poli_name
        FROM appointments a
        JOIN patients p ON a.patient_id = p.id

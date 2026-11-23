@@ -1,8 +1,67 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '@/lib/db';
 import { createSession, destroySession, getCurrentUser } from '@/lib/auth';
-import { loginSchema, registerSchema } from '@/lib/validators';
-import { toServiceErrorResult } from '@/lib/serviceErrors';
+import {
+  loginSchema,
+  registerSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+} from '@/lib/validators';
+import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
+
+const RESET_TOKEN_TTL_MINUTES = 30;
+let ensureResetTablePromise = null;
+
+/**
+ * Ensure the password_reset_tokens table exists in PostgreSQL.
+ * Allows the feature to work out-of-the-box without requiring a manual DB re-seed.
+ */
+async function ensurePasswordResetTable() {
+  if (!ensureResetTablePromise) {
+    ensureResetTablePromise = (async () => {
+      await query(`
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token_hash VARCHAR(64) UNIQUE NOT NULL,
+          expires_at TIMESTAMP NOT NULL,
+          used_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await query(
+        'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id)'
+      );
+      await query(
+        'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at)'
+      );
+    })().catch((err) => {
+      ensureResetTablePromise = null;
+      throw err;
+    });
+  }
+  return ensureResetTablePromise;
+}
+
+function hashResetToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function maskEmail(email) {
+  const [localPart = '', domain = ''] = String(email).split('@');
+  if (!domain) return email;
+  const visible = localPart.slice(0, Math.min(2, localPart.length));
+  return `${visible}***@${domain}`;
+}
+
+function getZodFirstError(validation, fallback) {
+  return (
+    validation?.error?.issues?.[0]?.message ||
+    validation?.error?.errors?.[0]?.message ||
+    fallback
+  );
+}
 
 /**
  * Normalize input that might arrive as FormData or plain Object.
@@ -285,5 +344,264 @@ export async function getAuthUser() {
     return { success: true, data: user };
   } catch (err) {
     return toServiceErrorResult('getAuthUser', err);
+  }
+}
+
+/**
+ * Create a single-use password reset token for an active user account.
+ * In development mode without an email provider, returns `devResetPath` so
+ * the reset flow can be tested directly from the UI.
+ * @param {FormData|Object} input
+ * @returns {Promise<{success: boolean, message?: string, devResetPath?: string, error?: string, status?: number}>}
+ */
+export async function requestPasswordReset(input) {
+  try {
+    const raw = normalizeInput(input);
+    const validation = forgotPasswordSchema.safeParse(raw);
+    if (!validation.success) {
+      return {
+        success: false,
+        error: getZodFirstError(validation, 'Format email tidak valid.'),
+        status: 400,
+      };
+    }
+
+    await ensurePasswordResetTable();
+
+    const normalizedEmail = validation.data.email.toLowerCase().trim();
+    const userRes = await query(
+      `SELECT id, email, is_active
+       FROM users
+       WHERE LOWER(email) = $1`,
+      [normalizedEmail]
+    );
+
+    const genericMessage =
+      'Jika email terdaftar dan aktif, tautan pengaturan ulang kata sandi telah disiapkan (berlaku selama 30 menit).';
+
+    if (userRes.rows.length === 0 || !userRes.rows[0].is_active) {
+      return {
+        success: true,
+        message: genericMessage,
+      };
+    }
+
+    const user = userRes.rows[0];
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashResetToken(rawToken);
+
+    await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE password_reset_tokens
+         SET used_at = NOW()
+         WHERE user_id = $1 AND used_at IS NULL`,
+        [user.id]
+      );
+
+      await client.query(
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, NOW() + ($3 * INTERVAL '1 minute'))`,
+        [user.id, tokenHash, RESET_TOKEN_TTL_MINUTES]
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'PASSWORD_RESET_REQUEST', 'users', $2, $3)`,
+        [
+          user.id,
+          user.id,
+          JSON.stringify({
+            email: user.email,
+            expires_in_minutes: RESET_TOKEN_TTL_MINUTES,
+            timestamp: new Date().toISOString(),
+          }),
+        ]
+      );
+    });
+
+    const resetPath = `/reset-password?token=${rawToken}`;
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const isDev = process.env.NODE_ENV !== 'production';
+
+    if (isDev) {
+      console.info(`[MedFlow Auth] Password reset link for ${user.email}: ${appUrl}${resetPath}`);
+    }
+
+    return {
+      success: true,
+      message: genericMessage,
+      ...(isDev ? { devResetPath: resetPath } : {}),
+    };
+  } catch (err) {
+    return toServiceErrorResult(
+      'requestPasswordReset',
+      err,
+      'Terjadi kesalahan sistem saat memproses permintaan lupa sandi.'
+    );
+  }
+}
+
+/**
+ * Validate whether a password reset token exists, is unused, and has not expired.
+ * @param {string} token
+ * @returns {Promise<{success: boolean, data?: {maskedEmail: string, expiresAt: string}, error?: string, status?: number}>}
+ */
+export async function verifyPasswordResetToken(token) {
+  try {
+    const cleanToken = typeof token === 'string' ? token.trim() : '';
+    if (!cleanToken) {
+      return {
+        success: false,
+        error: 'Token reset kata sandi tidak ditemukan.',
+        status: 400,
+      };
+    }
+
+    await ensurePasswordResetTable();
+
+    const tokenHash = hashResetToken(cleanToken);
+    const res = await query(
+      `SELECT prt.id, prt.expires_at, prt.used_at, u.email, u.is_active
+       FROM password_reset_tokens prt
+       JOIN users u ON u.id = prt.user_id
+       WHERE prt.token_hash = $1`,
+      [tokenHash]
+    );
+
+    if (res.rows.length === 0) {
+      return {
+        success: false,
+        error: 'Tautan reset kata sandi tidak valid atau sudah tidak berlaku.',
+        status: 400,
+      };
+    }
+
+    const row = res.rows[0];
+    if (row.used_at) {
+      return {
+        success: false,
+        error: 'Tautan reset kata sandi ini sudah pernah digunakan.',
+        status: 400,
+      };
+    }
+
+    if (new Date(row.expires_at) <= new Date()) {
+      return {
+        success: false,
+        error: 'Tautan reset kata sandi sudah kedaluwarsa. Silakan minta tautan baru.',
+        status: 400,
+      };
+    }
+
+    if (!row.is_active) {
+      return {
+        success: false,
+        error: 'Akun pengguna sedang dinonaktifkan. Silakan hubungi administrator.',
+        status: 403,
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        maskedEmail: maskEmail(row.email),
+        expiresAt: row.expires_at,
+      },
+    };
+  } catch (err) {
+    return toServiceErrorResult(
+      'verifyPasswordResetToken',
+      err,
+      'Gagal memverifikasi tautan reset kata sandi.'
+    );
+  }
+}
+
+/**
+ * Reset a user's password using a valid single-use reset token.
+ * @param {FormData|Object} input
+ * @returns {Promise<{success: boolean, message?: string, error?: string, status?: number}>}
+ */
+export async function resetPasswordWithToken(input) {
+  try {
+    const raw = normalizeInput(input);
+    const validation = resetPasswordSchema.safeParse(raw);
+    if (!validation.success) {
+      return {
+        success: false,
+        error: getZodFirstError(validation, 'Data pengaturan ulang kata sandi tidak valid.'),
+        status: 400,
+      };
+    }
+
+    await ensurePasswordResetTable();
+
+    const { token, password } = validation.data;
+    const tokenHash = hashResetToken(token);
+    const newPasswordHash = await bcrypt.hash(password, 12);
+
+    await withTransaction(async (client) => {
+      const tokenRes = await client.query(
+        `SELECT prt.id, prt.user_id, prt.expires_at, prt.used_at, u.email, u.is_active
+         FROM password_reset_tokens prt
+         JOIN users u ON u.id = prt.user_id
+         WHERE prt.token_hash = $1
+         FOR UPDATE`,
+        [tokenHash]
+      );
+
+      if (tokenRes.rows.length === 0) {
+        throw new ServiceError('Tautan reset kata sandi tidak valid atau sudah tidak berlaku.', 400);
+      }
+
+      const row = tokenRes.rows[0];
+      if (row.used_at) {
+        throw new ServiceError('Tautan reset kata sandi ini sudah pernah digunakan.', 400);
+      }
+      if (new Date(row.expires_at) <= new Date()) {
+        throw new ServiceError('Tautan reset kata sandi sudah kedaluwarsa. Silakan minta tautan baru.', 400);
+      }
+      if (!row.is_active) {
+        throw new ServiceError('Akun pengguna sedang dinonaktifkan. Silakan hubungi administrator.', 403);
+      }
+
+      await client.query(
+        `UPDATE users
+         SET password_hash = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [newPasswordHash, row.user_id]
+      );
+
+      await client.query(
+        `UPDATE password_reset_tokens
+         SET used_at = NOW()
+         WHERE user_id = $1 AND used_at IS NULL`,
+        [row.user_id]
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'PASSWORD_RESET', 'users', $2, $3)`,
+        [
+          row.user_id,
+          row.user_id,
+          JSON.stringify({
+            email: row.email,
+            timestamp: new Date().toISOString(),
+          }),
+        ]
+      );
+    });
+
+    return {
+      success: true,
+      message: 'Kata sandi berhasil diperbarui. Silakan masuk menggunakan kata sandi baru Anda.',
+    };
+  } catch (err) {
+    return toServiceErrorResult(
+      'resetPasswordWithToken',
+      err,
+      'Terjadi kesalahan sistem saat memperbarui kata sandi.'
+    );
   }
 }

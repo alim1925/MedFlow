@@ -1,7 +1,11 @@
 import { query, withTransaction } from '@/lib/db';
 import { getCurrentUser, createSession } from '@/lib/auth';
-import { bookingSchema, feedbackSchema, patientProfileUpdateSchema } from '@/lib/validators';
+import { bookingSchema, feedbackSchema, patientProfileUpdateSchema, prescriptionPaymentSubmitSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
+import { ensurePharmacySchema } from '@/lib/pharmacySchema';
+import { formatRupiah, buildPrescriptionInvoiceNumber } from '@/lib/currency';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Helper to ensure user is logged in as PATIENT and fetch patient record.
@@ -424,6 +428,7 @@ export async function getMyAppointments() {
 
 export async function getDashboardData() {
   try {
+    await ensurePharmacySchema();
     const { user, patient } = await requirePatient();
 
     const nextApptRes = await query(
@@ -452,12 +457,21 @@ export async function getDashboardData() {
          pr.created_at,
          mr.diagnosis,
          d.full_name AS doctor_name,
+         pp.invoice_number,
+         COALESCE(pp.status, 'UNPAID') AS payment_status,
+         COALESCE(
+           pp.total_amount,
+           SUM(pi.quantity * COALESCE(pi.unit_price, m.price, 0)),
+           0
+         )::numeric AS total_amount,
          COALESCE(
            json_agg(
              json_build_object(
                'id', pi.id,
                'medicine_name', m.name,
                'quantity', pi.quantity,
+               'unit_price', COALESCE(pi.unit_price, m.price, 0),
+               'subtotal', (pi.quantity * COALESCE(pi.unit_price, m.price, 0)),
                'dosage_rule', pi.dosage_rule,
                'unit', m.unit
              )
@@ -467,10 +481,11 @@ export async function getDashboardData() {
        FROM prescriptions pr
        JOIN medical_records mr ON pr.medical_record_id = mr.id
        JOIN doctors d ON mr.doctor_id = d.id
+       LEFT JOIN prescription_payments pp ON pr.id = pp.prescription_id
        LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
        LEFT JOIN medicines m ON pi.medicine_id = m.id
        WHERE mr.patient_id = $1
-       GROUP BY pr.id, mr.diagnosis, d.full_name
+       GROUP BY pr.id, mr.diagnosis, d.full_name, pp.id
        ORDER BY pr.created_at DESC
        LIMIT 1`,
       [patient.id]
@@ -562,6 +577,7 @@ export async function cancelAppointment(appointmentId) {
 
 export async function getMyMedicalRecords() {
   try {
+    await ensurePharmacySchema();
     const { patient } = await requirePatient();
 
     const recordsRes = await query(
@@ -607,6 +623,13 @@ export async function getMyMedicalRecords() {
            pr.ready_at,
            pr.picked_up_at,
            pr.created_at,
+           pp.invoice_number,
+           COALESCE(pp.status, 'UNPAID') AS payment_status,
+           COALESCE(
+             pp.total_amount,
+             SUM(pi.quantity * COALESCE(pi.unit_price, m.price, 0)),
+             0
+           )::numeric AS total_amount,
            COALESCE(
              json_agg(
                json_build_object(
@@ -617,6 +640,8 @@ export async function getMyMedicalRecords() {
                  'form', m.form,
                  'unit', m.unit,
                  'quantity', pi.quantity,
+                 'unit_price', COALESCE(pi.unit_price, m.price, 0),
+                 'subtotal', (pi.quantity * COALESCE(pi.unit_price, m.price, 0)),
                  'dosage_rule', pi.dosage_rule,
                  'duration_days', pi.duration_days
                )
@@ -625,10 +650,11 @@ export async function getMyMedicalRecords() {
              '[]'::json
            ) AS items
          FROM prescriptions pr
+         LEFT JOIN prescription_payments pp ON pr.id = pp.prescription_id
          LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
          LEFT JOIN medicines m ON pi.medicine_id = m.id
          WHERE pr.medical_record_id = ANY($1)
-         GROUP BY pr.id
+         GROUP BY pr.id, pp.id
          ORDER BY pr.created_at DESC`,
         [recordIds]
       ),
@@ -673,6 +699,7 @@ export async function getMyMedicalRecords() {
 
 export async function getMyPrescriptions() {
   try {
+    await ensurePharmacySchema();
     const { patient } = await requirePatient();
 
     const res = await query(
@@ -687,16 +714,38 @@ export async function getMyPrescriptions() {
          mr.diagnosis,
          d.full_name AS doctor_name,
          pol.name AS poli_name,
+         pp.id AS payment_id,
+         pp.invoice_number,
+         COALESCE(pp.status, 'UNPAID') AS payment_status,
+         pp.payment_method,
+         pp.payer_name,
+         pp.payment_reference,
+         pp.payment_notes,
+         pp.paid_at,
+         pp.confirmed_at,
+         pp.rejection_reason AS payment_rejection_reason,
+         u_conf.email AS confirmed_by_email,
+         COALESCE(
+           pp.total_amount,
+           SUM(pi.quantity * COALESCE(pi.unit_price, m.price, 0)),
+           0
+         )::numeric AS total_amount,
          COALESCE(
            json_agg(
              json_build_object(
                'id', pi.id,
+               'medicine_id', pi.medicine_id,
                'medicine_name', m.name,
+               'medicine_code', m.code,
+               'dosage_form', m.form,
                'quantity', pi.quantity,
+               'unit_price', COALESCE(pi.unit_price, m.price, 0),
+               'subtotal', (pi.quantity * COALESCE(pi.unit_price, m.price, 0)),
                'dosage_rule', pi.dosage_rule,
                'duration_days', pi.duration_days,
                'unit', m.unit
              )
+             ORDER BY pi.created_at ASC
            ) FILTER (WHERE pi.id IS NOT NULL),
            '[]'::json
          ) AS items
@@ -704,20 +753,201 @@ export async function getMyPrescriptions() {
        JOIN medical_records mr ON pr.medical_record_id = mr.id
        JOIN doctors d ON mr.doctor_id = d.id
        JOIN polis pol ON d.poli_id = pol.id
+       LEFT JOIN prescription_payments pp ON pr.id = pp.prescription_id
+       LEFT JOIN users u_conf ON pp.confirmed_by = u_conf.id
        LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
        LEFT JOIN medicines m ON pi.medicine_id = m.id
        WHERE mr.patient_id = $1
-       GROUP BY pr.id, mr.id, mr.diagnosis, d.full_name, pol.name
+       GROUP BY pr.id, mr.id, mr.diagnosis, d.full_name, pol.name, pp.id, u_conf.email
        ORDER BY pr.created_at DESC`,
       [patient.id]
     );
 
+    const data = res.rows.map((row) => ({
+      ...row,
+      invoice_number: row.invoice_number || buildPrescriptionInvoiceNumber(row.id, row.created_at),
+      total_amount: Number(row.total_amount) || 0,
+    }));
+
     return {
       success: true,
-      data: res.rows,
+      data,
     };
   } catch (err) {
     return toServiceErrorResult('getMyPrescriptions', err);
+  }
+}
+
+export async function submitPrescriptionPayment(prescriptionId, input) {
+  try {
+    await ensurePharmacySchema();
+    const { user, patient } = await requirePatient();
+
+    if (!prescriptionId || !UUID_REGEX.test(prescriptionId)) {
+      return { success: false, error: 'ID resep tidak valid.', status: 400 };
+    }
+
+    const raw = normalizeInput(input);
+    const validation = prescriptionPaymentSubmitSchema.safeParse({
+      payment_method: String(raw.payment_method || 'TRANSFER').toUpperCase(),
+      payer_name: raw.payer_name?.trim() || null,
+      payment_reference: raw.payment_reference?.trim() || null,
+      payment_notes: raw.payment_notes?.trim() || null,
+    });
+
+    if (!validation.success) {
+      return {
+        success: false,
+        error: validation.error.errors[0]?.message || 'Data pembayaran tidak valid.',
+        status: 400,
+      };
+    }
+
+    const { payment_method, payer_name, payment_reference, payment_notes } = validation.data;
+
+    if (
+      (payment_method === 'TRANSFER' || payment_method === 'QRIS') &&
+      (!payment_reference || payment_reference.trim().length < 3)
+    ) {
+      return {
+        success: false,
+        error: 'Nomor referensi / ID transaksi wajib diisi minimal 3 karakter untuk metode Transfer atau QRIS.',
+        status: 400,
+      };
+    }
+
+    const result = await withTransaction(async (client) => {
+      const prescRes = await client.query(
+        `SELECT pr.id, pr.status, pr.created_at, mr.patient_id
+         FROM prescriptions pr
+         JOIN medical_records mr ON pr.medical_record_id = mr.id
+         WHERE pr.id = $1 AND mr.patient_id = $2
+         FOR UPDATE`,
+        [prescriptionId, patient.id]
+      );
+
+      if (prescRes.rows.length === 0) {
+        throw new ServiceError('Resep obat tidak ditemukan.', 404);
+      }
+
+      const prescription = prescRes.rows[0];
+      if (prescription.status === 'CANCELLED') {
+        throw new ServiceError('Resep yang sudah dibatalkan tidak dapat dibayar.', 400);
+      }
+
+      const totalRes = await client.query(
+        `SELECT COALESCE(SUM(pi.quantity * COALESCE(pi.unit_price, m.price, 0)), 0)::numeric AS total_amount
+         FROM prescription_items pi
+         LEFT JOIN medicines m ON pi.medicine_id = m.id
+         WHERE pi.prescription_id = $1`,
+        [prescriptionId]
+      );
+      const totalAmount = Number(totalRes.rows[0]?.total_amount) || 0;
+
+      const existingPayRes = await client.query(
+        'SELECT * FROM prescription_payments WHERE prescription_id = $1 FOR UPDATE',
+        [prescriptionId]
+      );
+      const existingPayment = existingPayRes.rows[0] || null;
+
+      if (existingPayment?.status === 'PAID') {
+        throw new ServiceError('Pembayaran untuk resep ini sudah dikonfirmasi lunas.', 409);
+      }
+      if (existingPayment?.status === 'WAITING_CONFIRMATION') {
+        throw new ServiceError(
+          'Pembayaran Anda sudah dikirim dan sedang menunggu konfirmasi dari admin.',
+          409
+        );
+      }
+
+      const invoiceNumber =
+        existingPayment?.invoice_number ||
+        buildPrescriptionInvoiceNumber(prescriptionId, prescription.created_at);
+      const effectivePayerName = payer_name?.trim() || patient.full_name;
+      const effectiveRef =
+        payment_reference?.trim() ||
+        (payment_method === 'CASH' ? 'Bayar Tunai di Loket Kasir' : null);
+
+      const upsertRes = await client.query(
+        `INSERT INTO prescription_payments (
+           prescription_id, patient_id, invoice_number, total_amount,
+           payment_method, status, payer_name, payment_reference, payment_notes,
+           paid_at, confirmed_by, confirmed_at, rejection_reason
+         )
+         VALUES ($1, $2, $3, $4, $5, 'WAITING_CONFIRMATION', $6, $7, $8, NOW(), NULL, NULL, NULL)
+         ON CONFLICT (prescription_id) DO UPDATE SET
+           total_amount = EXCLUDED.total_amount,
+           payment_method = EXCLUDED.payment_method,
+           status = 'WAITING_CONFIRMATION',
+           payer_name = EXCLUDED.payer_name,
+           payment_reference = EXCLUDED.payment_reference,
+           payment_notes = EXCLUDED.payment_notes,
+           paid_at = NOW(),
+           confirmed_by = NULL,
+           confirmed_at = NULL,
+           rejection_reason = NULL,
+           updated_at = NOW()
+         RETURNING *`,
+        [
+          prescriptionId,
+          patient.id,
+          invoiceNumber,
+          totalAmount,
+          payment_method,
+          effectivePayerName,
+          effectiveRef,
+          payment_notes?.trim() || null,
+        ]
+      );
+
+      const payment = upsertRes.rows[0];
+
+      // Notify active administrators so admin can verify & confirm
+      const adminUsers = await client.query(
+        "SELECT id FROM users WHERE role = 'ADMIN' AND is_active = true"
+      );
+      for (const adm of adminUsers.rows) {
+        await client.query(
+          `INSERT INTO notifications (user_id, title, message, type)
+           VALUES ($1, $2, $3, 'PAYMENT')`,
+          [
+            adm.id,
+            'Konfirmasi Pembayaran Obat Baru',
+            `Pasien ${patient.full_name} mengirim pembayaran resep #${prescriptionId
+              .slice(0, 8)
+              .toUpperCase()} (${invoiceNumber}) sebesar ${formatRupiah(totalAmount)} via ${payment_method}.`,
+          ]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'SUBMIT_PRESCRIPTION_PAYMENT', 'prescription_payments', $2, $3)`,
+        [
+          user.id,
+          payment.id,
+          JSON.stringify({
+            prescription_id: prescriptionId,
+            invoice_number: invoiceNumber,
+            total_amount: totalAmount,
+            payment_method,
+          }),
+        ]
+      );
+
+      return payment;
+    });
+
+    return {
+      success: true,
+      data: {
+        ...result,
+        total_amount: Number(result.total_amount) || 0,
+      },
+      message: 'Konfirmasi pembayaran berhasil dikirim. Menunggu verifikasi admin.',
+    };
+  } catch (err) {
+    return toServiceErrorResult('submitPrescriptionPayment', err);
   }
 }
 

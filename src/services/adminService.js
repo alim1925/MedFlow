@@ -3,6 +3,7 @@ import { query, withTransaction } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { poliSchema, medicineSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
+import { ensurePharmacySchema } from '@/lib/pharmacySchema';
 import { transitionAppointmentStatus } from '@/services/appointmentStatusService';
 
 async function requireAdmin() {
@@ -43,6 +44,7 @@ function normalizeInput(input) {
 export async function getStats() {
   try {
     await requireAdmin();
+    await ensurePharmacySchema();
 
     const [
       patientsRes,
@@ -51,6 +53,7 @@ export async function getStats() {
       prescWaitingRes,
       lowStockRes,
       totalApptRes,
+      pendingPaymentsRes,
     ] = await Promise.all([
       query('SELECT COUNT(*)::int AS count FROM patients'),
       query('SELECT COUNT(*)::int AS count FROM doctors WHERE is_active = true'),
@@ -58,6 +61,7 @@ export async function getStats() {
       query("SELECT COUNT(*)::int AS count FROM prescriptions WHERE status IN ('WAITING', 'PROCESSING')"),
       query('SELECT COUNT(*)::int AS count FROM medicines WHERE stock <= min_stock AND is_active = true'),
       query('SELECT COUNT(*)::int AS count FROM appointments'),
+      query("SELECT COUNT(*)::int AS count FROM prescription_payments WHERE status = 'WAITING_CONFIRMATION'"),
     ]);
 
     const statsData = {
@@ -67,6 +71,7 @@ export async function getStats() {
       prescriptions_waiting: prescWaitingRes.rows[0]?.count || 0,
       low_stock_medicines: lowStockRes.rows[0]?.count || 0,
       total_appointments: totalApptRes.rows[0]?.count || 0,
+      pending_payment_confirmations: pendingPaymentsRes.rows[0]?.count || 0,
     };
 
     return {
@@ -521,34 +526,41 @@ export async function toggleDoctorActive(id) {
   }
 }
 
-let medicineColumnsPromise = null;
-
-async function ensureMedicineColumns() {
-  if (!medicineColumnsPromise) {
-    medicineColumnsPromise = query(`
-      ALTER TABLE medicines ADD COLUMN IF NOT EXISTS description TEXT;
-      ALTER TABLE medicines ADD COLUMN IF NOT EXISTS medicine_type VARCHAR(20) NOT NULL DEFAULT 'BIASA';
-    `).catch((err) => {
-      medicineColumnsPromise = null;
-      throw err;
-    });
-  }
-  return medicineColumnsPromise;
-}
-
 export async function getMedicines() {
   try {
     await requireAdminOrDoctor();
-    await ensureMedicineColumns();
+    await ensurePharmacySchema();
 
     const res = await query(
-      `SELECT * FROM medicines
-       WHERE is_active = true
-       ORDER BY name ASC`
+      `SELECT
+         m.*,
+         COALESCE(m.price, 0)::numeric AS price,
+         COALESCE(tx.active_transaction_count, 0)::int AS active_transaction_count
+       FROM medicines m
+       LEFT JOIN (
+         SELECT
+           pi.medicine_id,
+           COUNT(DISTINCT pr.id)::int AS active_transaction_count
+         FROM prescription_items pi
+         JOIN prescriptions pr ON pi.prescription_id = pr.id
+         LEFT JOIN prescription_payments pp ON pr.id = pp.prescription_id
+         WHERE pr.status IN ('WAITING', 'PROCESSING', 'READY')
+            OR (
+              pr.status <> 'CANCELLED'
+              AND pp.id IS NOT NULL
+              AND pp.status IN ('UNPAID', 'WAITING_CONFIRMATION', 'REJECTED')
+            )
+         GROUP BY pi.medicine_id
+       ) tx ON m.id = tx.medicine_id
+       WHERE m.is_active = true
+       ORDER BY m.name ASC`
     );
     return {
       success: true,
-      data: res.rows,
+      data: res.rows.map((row) => ({
+        ...row,
+        price: Number(row.price) || 0,
+      })),
     };
   } catch (err) {
     return toServiceErrorResult('getMedicines', err);
@@ -558,7 +570,7 @@ export async function getMedicines() {
 export async function createMedicine(input) {
   try {
     const admin = await requireAdmin();
-    await ensureMedicineColumns();
+    await ensurePharmacySchema();
     const raw = normalizeInput(input);
 
     const normalizedType = String(raw.medicine_type || 'BIASA').toUpperCase();
@@ -567,6 +579,7 @@ export async function createMedicine(input) {
       description: raw.description?.trim() || null,
       medicine_type: normalizedType === 'KERAS' ? 'KERAS' : 'BIASA',
       form: raw.form ?? raw.dosage_form,
+      price: raw.price !== undefined && raw.price !== '' ? Number(raw.price) : 0,
       stock: raw.stock !== undefined ? Number(raw.stock) : 0,
       min_stock: raw.min_stock !== undefined ? Number(raw.min_stock) : 0,
     };
@@ -580,12 +593,12 @@ export async function createMedicine(input) {
       };
     }
 
-    const { code, name, description, medicine_type, category, form, unit, stock, min_stock } = validation.data;
+    const { code, name, description, medicine_type, category, form, unit, price, stock, min_stock } = validation.data;
 
     const result = await withTransaction(async (client) => {
       const medRes = await client.query(
-        `INSERT INTO medicines (code, name, description, medicine_type, category, form, unit, stock, min_stock, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+        `INSERT INTO medicines (code, name, description, medicine_type, category, form, unit, price, stock, min_stock, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
          RETURNING *`,
         [
           code.trim(),
@@ -595,6 +608,7 @@ export async function createMedicine(input) {
           category || null,
           form || null,
           unit.trim(),
+          price || 0,
           stock || 0,
           min_stock || 0,
         ]
@@ -619,6 +633,7 @@ export async function createMedicine(input) {
             name: newMed.name,
             code: newMed.code,
             medicine_type: newMed.medicine_type,
+            price: Number(newMed.price) || 0,
             initial_stock: stock,
           }),
         ]
@@ -642,7 +657,7 @@ export async function createMedicine(input) {
 export async function updateMedicine(id, input) {
   try {
     const admin = await requireAdmin();
-    await ensureMedicineColumns();
+    await ensurePharmacySchema();
     const raw = normalizeInput(input);
 
     const code = raw.code;
@@ -652,6 +667,8 @@ export async function updateMedicine(id, input) {
     const category = raw.category;
     const form = raw.form ?? raw.dosage_form;
     const unit = raw.unit;
+    const hasPriceInput = raw.price !== undefined && raw.price !== '';
+    const parsedPrice = hasPriceInput ? Number(raw.price) : undefined;
     const hasStockInput = raw.stock !== undefined && raw.stock !== '';
     const parsedStock = hasStockInput ? Number(raw.stock) : undefined;
     const min_stock = raw.min_stock;
@@ -660,6 +677,14 @@ export async function updateMedicine(id, input) {
       return {
         success: false,
         error: 'Kode, nama obat, dan satuan wajib diisi.',
+        status: 400,
+      };
+    }
+
+    if (hasPriceInput && (Number.isNaN(parsedPrice) || parsedPrice < 0)) {
+      return {
+        success: false,
+        error: 'Harga obat tidak boleh bernilai negatif.',
         status: 400,
       };
     }
@@ -674,7 +699,7 @@ export async function updateMedicine(id, input) {
 
     const updated = await withTransaction(async (client) => {
       const existingRes = await client.query(
-        'SELECT id, stock FROM medicines WHERE id = $1 FOR UPDATE',
+        'SELECT id, stock, price FROM medicines WHERE id = $1 FOR UPDATE',
         [id]
       );
       if (existingRes.rows.length === 0) {
@@ -682,7 +707,9 @@ export async function updateMedicine(id, input) {
       }
 
       const previousStock = Number(existingRes.rows[0].stock) || 0;
+      const previousPrice = Number(existingRes.rows[0].price) || 0;
       const nextStock = hasStockInput ? Math.floor(parsedStock) : previousStock;
+      const nextPrice = hasPriceInput ? parsedPrice : previousPrice;
 
       const res = await client.query(
         `UPDATE medicines
@@ -693,10 +720,11 @@ export async function updateMedicine(id, input) {
              category = $5,
              form = $6,
              unit = $7,
-             stock = $8,
-             min_stock = $9,
+             price = $8,
+             stock = $9,
+             min_stock = $10,
              updated_at = NOW()
-         WHERE id = $10
+         WHERE id = $11
          RETURNING *`,
         [
           code.trim(),
@@ -706,6 +734,7 @@ export async function updateMedicine(id, input) {
           category?.trim() || null,
           form?.trim() || null,
           unit.trim(),
+          nextPrice,
           nextStock,
           Number(min_stock) || 0,
           id,
@@ -732,6 +761,7 @@ export async function updateMedicine(id, input) {
             name: row.name,
             code: row.code,
             medicine_type: row.medicine_type,
+            price: Number(row.price) || 0,
             stock: nextStock,
           }),
         ]
@@ -826,6 +856,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 export async function deleteMedicine(medicineId) {
   try {
     const admin = await requireAdmin();
+    await ensurePharmacySchema();
 
     if (!medicineId || !UUID_REGEX.test(medicineId)) {
       return {
@@ -846,6 +877,32 @@ export async function deleteMedicine(medicineId) {
       }
 
       const medicine = medRes.rows[0];
+
+      // Block deletion if medicine is currently in any ongoing prescription or unpaid payment transaction
+      const activeTxRes = await client.query(
+        `SELECT COUNT(DISTINCT pr.id)::int AS count
+         FROM prescription_items pi
+         JOIN prescriptions pr ON pi.prescription_id = pr.id
+         LEFT JOIN prescription_payments pp ON pr.id = pp.prescription_id
+         WHERE pi.medicine_id = $1
+           AND (
+             pr.status IN ('WAITING', 'PROCESSING', 'READY')
+             OR (
+               pr.status <> 'CANCELLED'
+               AND pp.id IS NOT NULL
+               AND pp.status IN ('UNPAID', 'WAITING_CONFIRMATION', 'REJECTED')
+             )
+           )`,
+        [medicineId]
+      );
+      const activeTxCount = activeTxRes.rows[0]?.count || 0;
+
+      if (activeTxCount > 0) {
+        throw new ServiceError(
+          `Obat "${medicine.name}" tidak dapat dihapus karena sedang dalam proses transaksi (${activeTxCount} resep aktif/menunggu pembayaran). Selesaikan atau batalkan transaksi terkait terlebih dahulu.`,
+          409
+        );
+      }
 
       const prescUsageRes = await client.query(
         'SELECT COUNT(*)::int AS count FROM prescription_items WHERE medicine_id = $1',

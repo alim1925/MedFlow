@@ -2,6 +2,8 @@ import { query, withTransaction } from '@/lib/db';
 import { getCurrentUser, createSession } from '@/lib/auth';
 import { scheduleSchema, doctorProfileUpdateSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
+import { ensurePharmacySchema } from '@/lib/pharmacySchema';
+import { buildPrescriptionInvoiceNumber } from '@/lib/currency';
 import { transitionAppointmentStatus } from '@/services/appointmentStatusService';
 
 let doctorColumnsPromise = null;
@@ -514,6 +516,7 @@ export async function updateAppointmentStatusByDoctor(appointmentId, targetStatu
 
 export async function getAppointmentWithPatient(appointmentId) {
   try {
+    await ensurePharmacySchema();
     const { doctor } = await requireDoctor();
 
     const apptRes = await query(
@@ -575,6 +578,13 @@ export async function getAppointmentWithPatient(appointmentId) {
       const prescRes = await query(
         `SELECT 
            pr.*,
+           pp.invoice_number,
+           COALESCE(pp.status, 'UNPAID') AS payment_status,
+           COALESCE(
+             pp.total_amount,
+             SUM(pi.quantity * COALESCE(pi.unit_price, m.price, 0)),
+             0
+           )::numeric AS total_amount,
            COALESCE(
              json_agg(
                json_build_object(
@@ -583,6 +593,8 @@ export async function getAppointmentWithPatient(appointmentId) {
                  'medicine_name', m.name,
                  'medicine_code', m.code,
                  'quantity', pi.quantity,
+                 'unit_price', COALESCE(pi.unit_price, m.price, 0),
+                 'subtotal', (pi.quantity * COALESCE(pi.unit_price, m.price, 0)),
                  'dosage_rule', pi.dosage_rule,
                  'duration_days', pi.duration_days,
                  'unit', m.unit
@@ -591,10 +603,11 @@ export async function getAppointmentWithPatient(appointmentId) {
              '[]'::json
            ) AS items
          FROM prescriptions pr
+         LEFT JOIN prescription_payments pp ON pr.id = pp.prescription_id
          LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
          LEFT JOIN medicines m ON pi.medicine_id = m.id
          WHERE pr.medical_record_id = $1
-         GROUP BY pr.id`,
+         GROUP BY pr.id, pp.id`,
         [medicalRecord.id]
       );
       prescription = prescRes.rows[0] || null;
@@ -616,6 +629,7 @@ export async function getAppointmentWithPatient(appointmentId) {
 
 export async function saveMedicalRecord(appointmentId, recordData, prescriptionItems = []) {
   try {
+    await ensurePharmacySchema();
     const { user, doctor } = await requireDoctor();
 
     if (!recordData?.diagnosis || !recordData.diagnosis.trim()) {
@@ -690,10 +704,12 @@ export async function saveMedicalRecord(appointmentId, recordData, prescriptionI
         const prescRes = await client.query(
           `INSERT INTO prescriptions (medical_record_id, status)
            VALUES ($1, 'WAITING')
-           RETURNING id`,
+           RETURNING id, created_at`,
           [newMedicalRecord.id]
         );
         prescriptionId = prescRes.rows[0].id;
+
+        let totalPrescriptionAmount = 0;
 
         for (const item of prescriptionItems) {
           if (!item.medicine_id || !item.quantity || Number(item.quantity) <= 0 || !item.dosage_rule) {
@@ -703,18 +719,41 @@ export async function saveMedicalRecord(appointmentId, recordData, prescriptionI
             );
           }
 
+          const medLookup = await client.query(
+            'SELECT id, name, COALESCE(price, 0)::numeric AS price, is_active FROM medicines WHERE id = $1',
+            [item.medicine_id]
+          );
+
+          if (medLookup.rows.length === 0 || !medLookup.rows[0].is_active) {
+            throw new ServiceError('Salah satu obat yang diresepkan tidak tersedia atau tidak aktif.', 400);
+          }
+
+          const qty = Number(item.quantity);
+          const unitPrice = Number(medLookup.rows[0].price) || 0;
+          totalPrescriptionAmount += qty * unitPrice;
+
           await client.query(
-            `INSERT INTO prescription_items (prescription_id, medicine_id, quantity, dosage_rule, duration_days)
-             VALUES ($1, $2, $3, $4, $5)`,
+            `INSERT INTO prescription_items (prescription_id, medicine_id, quantity, unit_price, dosage_rule, duration_days)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
             [
               prescriptionId,
               item.medicine_id,
-              Number(item.quantity),
+              qty,
+              unitPrice,
               item.dosage_rule.trim(),
               item.duration_days ? Number(item.duration_days) : null,
             ]
           );
         }
+
+        const invoiceNumber = buildPrescriptionInvoiceNumber(prescriptionId, prescRes.rows[0].created_at);
+        await client.query(
+          `INSERT INTO prescription_payments (
+             prescription_id, patient_id, invoice_number, total_amount, payment_method, status
+           )
+           VALUES ($1, $2, $3, $4, 'TRANSFER', 'UNPAID')`,
+          [prescriptionId, appt.patient_id, invoiceNumber, totalPrescriptionAmount]
+        );
       }
 
       await client.query(

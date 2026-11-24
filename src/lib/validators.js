@@ -121,9 +121,26 @@ export const medicineSchema = z.object({
   category: z.string().trim().min(1, 'Kategori obat wajib diisi'),
   form: z.string().trim().min(1, 'Bentuk obat wajib diisi'),
   unit: z.string().trim().min(1, 'Satuan obat wajib diisi'),
+  price: z.number().min(0, 'Harga obat tidak boleh bernilai negatif').default(0),
   stock: z.number().int().min(0, 'Stok tidak boleh bernilai negatif'),
   min_stock: z.number().int().min(0, 'Batas minimum stok tidak boleh negatif').default(0),
   is_active: z.boolean().default(true),
+});
+
+export const prescriptionPaymentSubmitSchema = z.object({
+  payment_method: z.enum(['TRANSFER', 'QRIS', 'CASH', 'BPJS'], {
+    errorMap: () => ({ message: 'Metode pembayaran tidak valid' }),
+  }),
+  payer_name: z.string().trim().max(255).optional().nullable(),
+  payment_reference: z.string().trim().max(120).optional().nullable(),
+  payment_notes: z.string().trim().max(500).optional().nullable(),
+});
+
+export const prescriptionPaymentActionSchema = z.object({
+  action: z.enum(['CONFIRM', 'REJECT']),
+  payment_method: z.enum(['TRANSFER', 'QRIS', 'CASH', 'BPJS']).optional(),
+  rejection_reason: z.string().trim().max(500).optional().nullable(),
+  notes: z.string().trim().max(500).optional().nullable(),
 });
 
 export const poliSchema = z.object({

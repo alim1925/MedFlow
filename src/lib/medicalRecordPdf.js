@@ -129,6 +129,9 @@ export function normalizeRecordForDocument(rec) {
       ? {
           id: prescription.id,
           status: prescription.status,
+          invoice_number: prescription.invoice_number || null,
+          payment_status: prescription.payment_status || 'UNPAID',
+          total_amount: Number(prescription.total_amount) || 0,
           notes: prescription.notes || '',
           created_at: prescription.created_at,
           ready_at: prescription.ready_at,
@@ -690,6 +693,33 @@ export function generateMedicalRecordPdfBytes(rawRecord) {
     });
 
     pdf.y -= 8;
+
+    const totalDrugAmount =
+      Number(rx.total_amount) ||
+      rxItems.reduce(
+        (sum, it) =>
+          sum + Number(it.subtotal ?? (Number(it.quantity) || 0) * (Number(it.unit_price) || 0)),
+        0
+      );
+    if (totalDrugAmount > 0) {
+      pdf.ensureSpace(26);
+      pdf.rect(MARGIN_X, pdf.y, CONTENT_WIDTH, 22, {
+        fill: COLORS.skySoft,
+        stroke: [0.729, 0.902, 0.992],
+      });
+      pdf.text('Total Estimasi Biaya Obat:', MARGIN_X + 12, pdf.y - 14, {
+        font: 'F2',
+        size: 8.5,
+        color: COLORS.ocean,
+      });
+      pdf.textRight(
+        `Rp ${Math.round(totalDrugAmount).toLocaleString('id-ID')}`,
+        MARGIN_X + CONTENT_WIDTH - 12,
+        pdf.y - 14,
+        { font: 'F2', size: 9, color: COLORS.ocean }
+      );
+      pdf.y -= 28;
+    }
 
     if (rx.notes) {
       drawTextBlock('Catatan Farmasi / Resep', rx.notes, {

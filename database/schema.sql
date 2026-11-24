@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS medicines (
     category VARCHAR(100),
     form VARCHAR(100),
     unit VARCHAR(50) NOT NULL,
+    price NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (price >= 0),
     stock INT NOT NULL CHECK (stock >= 0),
     min_stock INT DEFAULT 0,
     is_active BOOLEAN DEFAULT TRUE,
@@ -201,8 +202,29 @@ CREATE TABLE IF NOT EXISTS prescription_items (
     prescription_id UUID REFERENCES prescriptions(id) ON DELETE CASCADE,
     medicine_id UUID REFERENCES medicines(id) ON DELETE RESTRICT,
     quantity INT NOT NULL CHECK (quantity > 0),
+    unit_price NUMERIC(15, 2),
     dosage_rule VARCHAR(255) NOT NULL,
     duration_days INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4.12b PRESCRIPTION PAYMENTS (Billing & Admin Confirmation for Pharmacy)
+CREATE TABLE IF NOT EXISTS prescription_payments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    prescription_id UUID UNIQUE NOT NULL REFERENCES prescriptions(id) ON DELETE CASCADE,
+    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    invoice_number VARCHAR(50) UNIQUE NOT NULL,
+    total_amount NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
+    payment_method VARCHAR(30) NOT NULL DEFAULT 'TRANSFER',
+    status VARCHAR(30) NOT NULL DEFAULT 'UNPAID' CHECK (status IN ('UNPAID', 'WAITING_CONFIRMATION', 'PAID', 'REJECTED')),
+    payer_name VARCHAR(255),
+    payment_reference VARCHAR(120),
+    payment_notes TEXT,
+    paid_at TIMESTAMP,
+    confirmed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    confirmed_at TIMESTAMP,
+    rejection_reason TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -373,6 +395,8 @@ CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments(status);
 CREATE INDEX IF NOT EXISTS idx_medical_records_patient ON medical_records(patient_id);
 CREATE INDEX IF NOT EXISTS idx_medical_records_doctor ON medical_records(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_status ON prescriptions(status);
+CREATE INDEX IF NOT EXISTS idx_prescription_payments_patient ON prescription_payments(patient_id);
+CREATE INDEX IF NOT EXISTS idx_prescription_payments_status ON prescription_payments(status);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_medicine ON stock_movements(medicine_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE is_read = FALSE;
 CREATE INDEX IF NOT EXISTS idx_operational_revenues_date ON operational_revenues(transaction_date);
@@ -413,6 +437,9 @@ CREATE TRIGGER trg_update_prescriptions_updated_at BEFORE UPDATE ON prescription
 
 DROP TRIGGER IF EXISTS trg_update_prescription_items_updated_at ON prescription_items;
 CREATE TRIGGER trg_update_prescription_items_updated_at BEFORE UPDATE ON prescription_items FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trg_update_prescription_payments_updated_at ON prescription_payments;
+CREATE TRIGGER trg_update_prescription_payments_updated_at BEFORE UPDATE ON prescription_payments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS trg_update_operational_revenues_updated_at ON operational_revenues;
 CREATE TRIGGER trg_update_operational_revenues_updated_at BEFORE UPDATE ON operational_revenues FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

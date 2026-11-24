@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '@/components/Sidebar';
 import { apiRequest } from '@/lib/apiClient';
+import { formatRupiah } from '@/lib/currency';
 import {
   Pill,
   Plus,
@@ -16,7 +17,8 @@ import {
   Loader2,
   X,
   PackagePlus,
-  Boxes
+  Boxes,
+  Lock
 } from 'lucide-react';
 
 export default function AdminMedicinesPage() {
@@ -47,6 +49,7 @@ export default function AdminMedicinesPage() {
     category: 'Analgesik',
     dosage_form: 'Tablet',
     unit: 'tablet',
+    price: 2000,
     stock: 100,
     min_stock: 20,
   });
@@ -95,6 +98,7 @@ export default function AdminMedicinesPage() {
       category: 'Analgesik',
       dosage_form: 'Tablet',
       unit: 'tablet',
+      price: 2000,
       stock: 100,
       min_stock: 20,
     });
@@ -112,6 +116,7 @@ export default function AdminMedicinesPage() {
       category: med.category || 'Analgesik',
       dosage_form: med.dosage_form || med.form || 'Tablet',
       unit: med.unit || 'tablet',
+      price: Number(med.price) || 0,
       stock: med.stock ?? 0,
       min_stock: med.min_stock ?? 20,
     });
@@ -177,6 +182,7 @@ export default function AdminMedicinesPage() {
       form.append('category', formData.category);
       form.append('dosage_form', formData.dosage_form);
       form.append('unit', formData.unit);
+      form.append('price', String(formData.price));
       form.append('stock', String(formData.stock));
       form.append('min_stock', String(formData.min_stock));
 
@@ -335,6 +341,7 @@ export default function AdminMedicinesPage() {
                     <th className="py-3 px-4">Kode, Nama & Deskripsi Obat</th>
                     <th className="py-3 px-4">Tipe Obat</th>
                     <th className="py-3 px-4">Kategori & Bentuk</th>
+                    <th className="py-3 px-4">Harga Satuan</th>
                     <th className="py-3 px-4">Stok</th>
                     <th className="py-3 px-4">Batas Min.</th>
                     <th className="py-3 px-4 text-right">Aksi</th>
@@ -344,6 +351,8 @@ export default function AdminMedicinesPage() {
                   {medicines.map((med) => {
                     const isLow = (med.stock || 0) <= (med.min_stock || 0);
                     const isKeras = (med.medicine_type || 'BIASA').toUpperCase() === 'KERAS';
+                    const activeTxCount = Number(med.active_transaction_count) || 0;
+                    const inTransaction = activeTxCount > 0;
 
                     return (
                       <tr
@@ -353,9 +362,20 @@ export default function AdminMedicinesPage() {
                         }`}
                       >
                         <td className="py-3.5 px-4 max-w-xs">
-                          <p className="font-bold text-slate-900 text-xs sm:text-sm">
-                            {med.name}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="font-bold text-slate-900 text-xs sm:text-sm">
+                              {med.name}
+                            </p>
+                            {inTransaction && (
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                title={`Obat ini sedang digunakan dalam ${activeTxCount} transaksi resep/pembayaran aktif`}
+                              >
+                                <Lock className="w-2.5 h-2.5" />
+                                Dalam Transaksi ({activeTxCount})
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] text-slate-400 font-mono block">
                             {med.code}
                           </span>
@@ -382,6 +402,14 @@ export default function AdminMedicinesPage() {
                           </p>
                           <span className="text-[11px] text-slate-400">
                             {med.dosage_form || med.form || 'Tablet'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <p className="font-heading font-bold text-slate-900">
+                            {formatRupiah(med.price)}
+                          </p>
+                          <span className="text-[10px] text-slate-400">
+                            per {med.unit || 'unit'}
                           </span>
                         </td>
                         <td className="py-3.5 px-4">
@@ -422,9 +450,18 @@ export default function AdminMedicinesPage() {
                             </button>
                             <button
                               type="button"
+                              disabled={inTransaction}
                               onClick={() => openDeleteModal(med)}
-                              className="p-1.5 rounded-xl text-slate-500 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                              title="Hapus Obat"
+                              className={`p-1.5 rounded-xl transition ${
+                                inTransaction
+                                  ? 'text-slate-300 bg-slate-100 cursor-not-allowed'
+                                  : 'text-slate-500 hover:text-red-600 hover:bg-red-50 cursor-pointer'
+                              }`}
+                              title={
+                                inTransaction
+                                  ? `Tidak dapat dihapus: sedang dalam ${activeTxCount} proses transaksi aktif`
+                                  : 'Hapus Obat'
+                              }
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -570,7 +607,21 @@ export default function AdminMedicinesPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
+                  Harga (Rp) *
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={formData.price}
+                  onChange={(e) => setFormData({ ...formData, price: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
                   {editingId ? 'Jumlah Stok' : 'Stok Awal'}
@@ -579,20 +630,20 @@ export default function AdminMedicinesPage() {
                   type="number"
                   min="0"
                   value={formData.stock}
-                  onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })}
+                  onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value, 10) || 0 })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
-                  Ambang Min. Stok
+                  Min. Stok
                 </label>
                 <input
                   type="number"
                   min="0"
                   value={formData.min_stock}
-                  onChange={(e) => setFormData({ ...formData, min_stock: parseInt(e.target.value) || 0 })}
+                  onChange={(e) => setFormData({ ...formData, min_stock: parseInt(e.target.value, 10) || 0 })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>

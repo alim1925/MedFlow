@@ -226,6 +226,7 @@ async function seed() {
         category: 'Analgesik & Antipiretik',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 1500,
         stock: 500,
         minStock: 50,
       },
@@ -237,6 +238,7 @@ async function seed() {
         category: 'Antibiotik',
         form: 'Kapsul',
         unit: 'Kapsul',
+        price: 3500,
         stock: 250,
         minStock: 30,
       },
@@ -248,6 +250,7 @@ async function seed() {
         category: 'Anti-inflamasi Non-Steroid',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 2500,
         stock: 300,
         minStock: 40,
       },
@@ -259,6 +262,7 @@ async function seed() {
         category: 'Antasida & PPI',
         form: 'Kapsul',
         unit: 'Kapsul',
+        price: 4500,
         stock: 200,
         minStock: 25,
       },
@@ -270,6 +274,7 @@ async function seed() {
         category: 'Antihistamin',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 2000,
         stock: 350,
         minStock: 30,
       },
@@ -281,6 +286,7 @@ async function seed() {
         category: 'Antidiabetes Oral',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 2500,
         stock: 400,
         minStock: 50,
       },
@@ -292,6 +298,7 @@ async function seed() {
         category: 'Antihipertensi CCB',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 4000,
         stock: 300,
         minStock: 40,
       },
@@ -303,6 +310,7 @@ async function seed() {
         category: 'Antihipertensi ACE-I',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 2000,
         stock: 180,
         minStock: 30,
       },
@@ -314,6 +322,7 @@ async function seed() {
         category: 'Bronkodilator',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 3000,
         stock: 150,
         minStock: 20,
       },
@@ -325,6 +334,7 @@ async function seed() {
         category: 'Kortikosteroid',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 1500,
         stock: 220,
         minStock: 25,
       },
@@ -336,6 +346,7 @@ async function seed() {
         category: 'Antasida Lambung',
         form: 'Sirup',
         unit: 'Botol',
+        price: 18000,
         stock: 90,
         minStock: 15,
       },
@@ -347,6 +358,7 @@ async function seed() {
         category: 'Rehidrasi Elektrolit',
         form: 'Serbuk',
         unit: 'Sachet',
+        price: 3500,
         stock: 450,
         minStock: 50,
       },
@@ -358,6 +370,7 @@ async function seed() {
         category: 'Suplemen & Vitamin',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 2000,
         stock: 600,
         minStock: 60,
       },
@@ -369,6 +382,7 @@ async function seed() {
         category: 'Antibiotik Kuinolon',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 6000,
         stock: 120,
         minStock: 20,
       },
@@ -380,6 +394,7 @@ async function seed() {
         category: 'Hipolipidemik / Kolesterol',
         form: 'Tablet',
         unit: 'Tablet',
+        price: 5500,
         stock: 250,
         minStock: 30,
       },
@@ -387,12 +402,12 @@ async function seed() {
 
     for (const med of medicinesData) {
       const medRes = await client.query(
-        `INSERT INTO medicines (code, name, description, medicine_type, category, form, unit, stock, min_stock, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+        `INSERT INTO medicines (code, name, description, medicine_type, category, form, unit, price, stock, min_stock, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
          ON CONFLICT (code) DO UPDATE SET
-           name = $2, description = $3, medicine_type = $4, category = $5, form = $6, unit = $7, stock = $8, min_stock = $9, is_active = true
+           name = $2, description = $3, medicine_type = $4, category = $5, form = $6, unit = $7, price = $8, stock = $9, min_stock = $10, is_active = true
          RETURNING id, stock;`,
-        [med.code, med.name, med.description, med.medicineType, med.category, med.form, med.unit, med.stock, med.minStock]
+        [med.code, med.name, med.description, med.medicineType, med.category, med.form, med.unit, med.price, med.stock, med.minStock]
       );
       const medicineId = medRes.rows[0].id;
 

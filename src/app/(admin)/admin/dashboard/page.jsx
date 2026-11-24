@@ -18,7 +18,8 @@ import {
   Clock,
   Sparkles,
   PackageX,
-  BarChart3
+  BarChart3,
+  CreditCard
 } from 'lucide-react';
 
 export const metadata = {
@@ -43,6 +44,7 @@ export default async function AdminDashboardPage() {
     todaysAppointments: 0,
     lowStockMedicines: 0,
     prescriptionsWaiting: 0,
+    pendingPaymentConfirmations: 0,
   };
   let pharmacyQueue = [];
   let lowStockList = [];
@@ -62,6 +64,7 @@ export default async function AdminDashboardPage() {
         todaysAppointments: statsRes.data.today_appointments,
         lowStockMedicines: statsRes.data.low_stock_medicines,
         prescriptionsWaiting: statsRes.data.prescriptions_waiting,
+        pendingPaymentConfirmations: statsRes.data.pending_payment_confirmations || 0,
       };
     }
     if (queueRes?.success && Array.isArray(queueRes.data)) {
@@ -110,6 +113,32 @@ export default async function AdminDashboardPage() {
             <span>{formatDateIndo(new Date())}</span>
           </div>
         </div>
+
+        {/* Pending Payment Confirmations Alert */}
+        {stats.pendingPaymentConfirmations > 0 && (
+          <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center flex-shrink-0">
+                <CreditCard className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm font-heading font-bold text-indigo-950">
+                  {stats.pendingPaymentConfirmations} Pembayaran Obat Menunggu Konfirmasi Admin
+                </p>
+                <p className="text-xs text-indigo-700">
+                  Pasien telah mengirimkan konfirmasi pembayaran resep. Silakan verifikasi dan konfirmasi agar obat dapat diserahkan.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/admin/payments"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition w-fit"
+            >
+              <span>Konfirmasi Pembayaran</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        )}
 
         {/* 4 Stat Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -312,7 +341,7 @@ export default async function AdminDashboardPage() {
           <h2 className="text-sm font-heading font-bold text-slate-800 uppercase tracking-wider mb-4">
             Modul Administrasi MedFlow
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
             <Link
               href="/admin/users"
               className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:border-sky-300 hover:shadow-md transition text-center group"
@@ -366,6 +395,17 @@ export default async function AdminDashboardPage() {
               </div>
               <h3 className="text-xs font-heading font-bold text-slate-800">Farmasi</h3>
               <p className="text-[10px] text-slate-400 mt-0.5">Antrean Resep</p>
+            </Link>
+
+            <Link
+              href="/admin/payments"
+              className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:border-sky-300 hover:shadow-md transition text-center group"
+            >
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-2 group-hover:bg-rose-500 group-hover:text-white transition">
+                <CreditCard className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-heading font-bold text-slate-800">Pembayaran</h3>
+              <p className="text-[10px] text-slate-400 mt-0.5">Konfirmasi Obat</p>
             </Link>
 
             <Link

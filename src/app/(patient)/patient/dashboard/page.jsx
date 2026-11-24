@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getDashboardData } from '@/services/patientService';
 import StatusBadge from '@/components/StatusBadge';
+import { formatRupiah } from '@/lib/currency';
 import {
   Calendar,
   CalendarPlus,
@@ -444,9 +445,24 @@ export default async function PatientDashboardPage() {
                 )}
 
                 {latestPrescription.items && latestPrescription.items.length > 0 && (
-                  <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                    <span className="font-semibold text-slate-700 block mb-1">Daftar Obat:</span>
-                    {latestPrescription.items.map((it) => it.medicine_name || it.name).join(', ')}
+                  <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
+                    <div>
+                      <span className="font-semibold text-slate-700 block mb-1">Daftar Obat:</span>
+                      {latestPrescription.items.map((it) => it.medicine_name || it.name).join(', ')}
+                    </div>
+                    <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
+                      <span className="font-semibold text-slate-700">
+                        Total Biaya Obat: <strong className="text-sky-700">{formatRupiah(latestPrescription.total_amount)}</strong>
+                      </span>
+                      <StatusBadge
+                        status={
+                          latestPrescription.payment_status === 'REJECTED'
+                            ? 'PAYMENT_REJECTED'
+                            : latestPrescription.payment_status || 'UNPAID'
+                        }
+                        size="sm"
+                      />
+                    </div>
                   </div>
                 )}
               </div>

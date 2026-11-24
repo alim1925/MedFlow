@@ -5,6 +5,7 @@ import Sidebar from '@/components/Sidebar';
 import StatusBadge from '@/components/StatusBadge';
 import MedicalRecordActions from '@/components/MedicalRecordActions';
 import { apiRequest } from '@/lib/apiClient';
+import { formatRupiah } from '@/lib/currency';
 import {
   User,
   HeartPulse,
@@ -185,12 +186,15 @@ export default function ExamPage({ params }) {
     setError('');
     const med = medicinesList.find((m) => String(m.id) === String(newItem.medicine_id));
     const medName = med ? med.name : 'Obat';
+    const unitPrice = Number(med?.price) || 0;
 
     setPrescriptionItems((prev) => [
       ...prev,
       {
         medicine_id: newItem.medicine_id,
         medicine_name: medName,
+        unit: med?.unit || 'unit',
+        unit_price: unitPrice,
         quantity: parseInt(newItem.quantity) || 1,
         dosage_rule: newItem.dosage_rule,
         duration_days: parseInt(newItem.duration_days) || 3,
@@ -610,15 +614,23 @@ export default function ExamPage({ params }) {
                         {existingPrescription.items?.map((it, i) => (
                           <div
                             key={i}
-                            className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100 text-xs flex items-center justify-between"
+                            className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100 text-xs flex items-center justify-between gap-2"
                           >
                             <span className="font-bold text-purple-900">
-                              {it.medicine_name || it.name} ({it.quantity} unit)
+                              {it.medicine_name || it.name} ({it.quantity} {it.unit || 'unit'})
                             </span>
-                            <span className="text-slate-600">{it.dosage_rule}</span>
+                            <span className="text-slate-600">
+                              {it.dosage_rule}
+                              {Number(it.subtotal) > 0 ? ` • ${formatRupiah(it.subtotal)}` : ''}
+                            </span>
                           </div>
                         ))}
                       </div>
+                      {Number(existingPrescription.total_amount) > 0 && (
+                        <div className="mt-2 text-right text-xs font-bold text-sky-700">
+                          Total Biaya Resep: {formatRupiah(existingPrescription.total_amount)}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -875,7 +887,7 @@ export default function ExamPage({ params }) {
                           <option value="">-- Pilih dari Formularium Obat --</option>
                           {medicinesList.map((m) => (
                             <option key={m.id} value={m.id}>
-                              {m.name} (Stok: {m.stock} {m.unit || 'tab'})
+                              {m.name} — {formatRupiah(m.price)}/{m.unit || 'tab'} (Stok: {m.stock})
                             </option>
                           ))}
                         </select>
@@ -937,6 +949,7 @@ export default function ExamPage({ params }) {
                           <tr>
                             <th className="py-2.5 px-3">Nama Obat</th>
                             <th className="py-2.5 px-2 text-center">Jumlah</th>
+                            <th className="py-2.5 px-3 text-right">Est. Subtotal</th>
                             <th className="py-2.5 px-3">Aturan Pakai</th>
                             <th className="py-2.5 px-2 text-center">Durasi</th>
                             <th className="py-2.5 px-2 text-right">Aksi</th>
@@ -949,7 +962,10 @@ export default function ExamPage({ params }) {
                                 {item.medicine_name}
                               </td>
                               <td className="py-2.5 px-2 text-center font-bold text-slate-900">
-                                {item.quantity}
+                                {item.quantity} {item.unit || ''}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-semibold text-sky-700">
+                                {formatRupiah((Number(item.unit_price) || 0) * (Number(item.quantity) || 0))}
                               </td>
                               <td className="py-2.5 px-3 text-slate-600">
                                 {item.dosage_rule}
@@ -970,6 +986,23 @@ export default function ExamPage({ params }) {
                             </tr>
                           ))}
                         </tbody>
+                        <tfoot className="bg-slate-50 border-t border-slate-200">
+                          <tr>
+                            <td colSpan={2} className="py-2 px-3 text-right font-bold text-slate-700">
+                              Estimasi Total Biaya Obat:
+                            </td>
+                            <td className="py-2 px-3 text-right font-heading font-extrabold text-sky-700">
+                              {formatRupiah(
+                                prescriptionItems.reduce(
+                                  (sum, it) =>
+                                    sum + (Number(it.unit_price) || 0) * (Number(it.quantity) || 0),
+                                  0
+                                )
+                              )}
+                            </td>
+                            <td colSpan={3} />
+                          </tr>
+                        </tfoot>
                       </table>
                     </div>
                   )}

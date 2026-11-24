@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '@/components/Sidebar';
 import StatusBadge from '@/components/StatusBadge';
 import { apiRequest } from '@/lib/apiClient';
+import { formatRupiah } from '@/lib/currency';
+import Link from 'next/link';
 import {
   Pill,
   Clock,
@@ -15,7 +17,9 @@ import {
   Loader2,
   RefreshCw,
   User,
-  Stethoscope
+  Stethoscope,
+  CreditCard,
+  ArrowRight
 } from 'lucide-react';
 
 function formatDateIndo(dateStr) {
@@ -61,10 +65,26 @@ export default function AdminPharmacyPage() {
   }, []);
 
   useEffect(() => {
-    loadQueue();
+    let cancelled = false;
+    const fetchInitial = async () => {
+      try {
+        const res = await apiRequest('/api/pharmacy/prescriptions');
+        if (!cancelled) {
+          setQueue(res?.success && Array.isArray(res.data) ? res.data : []);
+        }
+      } catch (err) {
+        console.error('Error fetching pharmacy queue:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    fetchInitial();
     // Auto-refresh every 30 seconds
     const interval = setInterval(loadQueue, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [loadQueue]);
 
   // Actions
@@ -138,6 +158,34 @@ export default function AdminPharmacyPage() {
     }
   };
 
+  const handleConfirmPayment = async (rx) => {
+    setActionLoadingId(rx.id);
+    setItemErrors((prev) => ({ ...prev, [rx.id]: '' }));
+    try {
+      const res = await apiRequest(`/api/admin/payments/${rx.id}/confirm`, {
+        method: 'POST',
+        body: {
+          payment_method: rx.payment_method || 'CASH',
+        },
+      });
+      if (res && res.success) {
+        setToast(res.message || 'Pembayaran obat berhasil dikonfirmasi lunas.');
+        await loadQueue();
+      } else {
+        setItemErrors((prev) => ({
+          ...prev,
+          [rx.id]: res?.error || 'Gagal mengonfirmasi pembayaran obat.',
+        }));
+      }
+    } catch (err) {
+      console.error('Error confirming payment:', err);
+      setItemErrors((prev) => ({ ...prev, [rx.id]: 'Terjadi kendala jaringan.' }));
+    } finally {
+      setActionLoadingId(null);
+      setTimeout(() => setToast(''), 4000);
+    }
+  };
+
   // Filter items by active tab
   const filteredQueue = queue.filter((item) => item.status === activeTab);
 
@@ -157,14 +205,24 @@ export default function AdminPharmacyPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={loadQueue}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition cursor-pointer w-fit"
-          >
-            <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
-            <span>Segarkan Antrean</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/admin/payments"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold transition w-fit"
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              <span>Portal Konfirmasi Pembayaran</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+            <button
+              type="button"
+              onClick={loadQueue}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition cursor-pointer w-fit"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+              <span>Segarkan Antrean</span>
+            </button>
+          </div>
         </div>
 
         {/* Toast */}
@@ -266,34 +324,72 @@ export default function AdminPharmacyPage() {
                         </p>
                       </div>
 
-                      <StatusBadge status={rx.status} size="sm" />
+                      <div className="flex flex-col items-end gap-1">
+                        <StatusBadge status={rx.status} size="sm" />
+                        <StatusBadge
+                          status={
+                            rx.payment_status === 'REJECTED'
+                              ? 'PAYMENT_REJECTED'
+                              : rx.payment_status || 'UNPAID'
+                          }
+                          size="sm"
+                        />
+                      </div>
                     </div>
 
                     {/* Medicine List Table */}
                     <div>
                       <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">
-                        Item Obat yang Diresepkan:
+                        Item Obat & Rincian Biaya:
                       </span>
                       <div className="space-y-1.5 bg-slate-50 p-3 rounded-xl border border-slate-100">
                         {items.length === 0 ? (
                           <p className="text-xs text-slate-400 italic">Rincian item obat sedang dikonfirmasi.</p>
                         ) : (
-                          items.map((item, idx) => (
-                            <div
-                              key={idx}
-                              className="text-xs flex items-center justify-between text-slate-700"
-                            >
-                              <span className="font-semibold text-slate-900">
-                                {item.medicine_name || item.name}
+                          <>
+                            {items.map((item, idx) => (
+                              <div
+                                key={idx}
+                                className="text-xs flex items-center justify-between gap-2 text-slate-700"
+                              >
+                                <div className="min-w-0">
+                                  <span className="font-semibold text-slate-900 block truncate">
+                                    {item.medicine_name || item.name}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-mono">
+                                    {item.quantity} {item.unit || 'unit'} × {formatRupiah(item.unit_price)} • {item.dosage_rule}
+                                  </span>
+                                </div>
+                                <span className="text-slate-900 font-mono font-semibold whitespace-nowrap">
+                                  {formatRupiah(item.subtotal)}
+                                </span>
+                              </div>
+                            ))}
+                            <div className="pt-2 mt-2 border-t border-slate-200 flex items-center justify-between text-xs">
+                              <span className="font-bold text-slate-600">
+                                Total Tagihan ({rx.invoice_number}):
                               </span>
-                              <span className="text-slate-500 font-mono">
-                                {item.quantity} {item.unit || 'unit'} ({item.dosage_rule})
+                              <span className="font-heading font-extrabold text-sm text-sky-700">
+                                {formatRupiah(rx.total_amount)}
                               </span>
                             </div>
-                          ))
+                          </>
                         )}
                       </div>
                     </div>
+
+                    {/* Payment Info Banner */}
+                    {rx.payment_status === 'WAITING_CONFIRMATION' && (
+                      <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs space-y-0.5">
+                        <p className="font-bold">
+                          Pasien Mengirim Pembayaran ({rx.payment_method})
+                        </p>
+                        <p className="text-indigo-700">
+                          Pengirim: {rx.payer_name || rx.patient_name}
+                          {rx.payment_reference ? ` • Ref: ${rx.payment_reference}` : ''}
+                        </p>
+                      </div>
+                    )}
 
                     {/* Notes if any */}
                     {rx.notes && (
@@ -315,7 +411,29 @@ export default function AdminPharmacyPage() {
                   </div>
 
                   {/* Action Buttons based on status */}
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-end gap-2">
+                    {rx.payment_status !== 'PAID' && (
+                      <button
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => handleConfirmPayment(rx)}
+                        className="py-2 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                      >
+                        {isLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <>
+                            <CreditCard className="w-3.5 h-3.5" />
+                            <span>
+                              {rx.payment_status === 'WAITING_CONFIRMATION'
+                                ? 'Konfirmasi Pembayaran'
+                                : 'Konfirmasi Bayar Loket'}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
                     {rx.status === 'WAITING' && (
                       <button
                         type="button"

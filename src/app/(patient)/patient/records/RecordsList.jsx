@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import MedicalRecordActions from '@/components/MedicalRecordActions';
+import StatusBadge from '@/components/StatusBadge';
 import { getPrescriptionStatusLabel } from '@/lib/medicalRecordPdf';
+import { formatRupiah } from '@/lib/currency';
 import {
   Calendar,
   ChevronDown,
@@ -208,30 +210,62 @@ export default function RecordsList({ records = [] }) {
                         <Pill className="w-3.5 h-3.5 text-purple-600" />
                         <span>Rincian Resep Obat</span>
                       </h5>
-                      <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-100 text-[10px] font-semibold">
-                        {getPrescriptionStatusLabel(prescription.status)}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-100 text-[10px] font-semibold">
+                          {getPrescriptionStatusLabel(prescription.status)}
+                        </span>
+                        {prescription.status !== 'CANCELLED' && (
+                          <StatusBadge
+                            status={
+                              prescription.payment_status === 'REJECTED'
+                                ? 'PAYMENT_REJECTED'
+                                : prescription.payment_status || 'UNPAID'
+                            }
+                            size="sm"
+                          />
+                        )}
+                      </div>
                     </div>
                     {prescriptionItems.length === 0 ? (
                       <p className="text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100">
                         Tidak ada item obat dalam resep ini.
                       </p>
                     ) : (
-                      <div className="space-y-1.5">
-                        {prescriptionItems.map((it, idx) => (
-                          <div
-                            key={it.id || idx}
-                            className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100 flex flex-wrap items-center justify-between gap-2"
-                          >
-                            <span className="font-bold text-purple-900">
-                              {it.medicine_name || it.name} ({it.quantity} {it.unit || 'unit'})
-                            </span>
-                            <span className="text-slate-600">
-                              {it.dosage_rule}
-                              {it.duration_days ? ` • ${it.duration_days} hari` : ''}
-                            </span>
-                          </div>
-                        ))}
+                      <div className="space-y-2">
+                        <div className="space-y-1.5">
+                          {prescriptionItems.map((it, idx) => (
+                            <div
+                              key={it.id || idx}
+                              className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100 flex flex-wrap items-center justify-between gap-2"
+                            >
+                              <div>
+                                <span className="font-bold text-purple-900 block">
+                                  {it.medicine_name || it.name} ({it.quantity} {it.unit || 'unit'})
+                                </span>
+                                <span className="text-slate-600 text-[11px]">
+                                  {it.dosage_rule}
+                                  {it.duration_days ? ` • ${it.duration_days} hari` : ''}
+                                </span>
+                              </div>
+                              <div className="text-right font-mono">
+                                <span className="font-bold text-slate-900 block">
+                                  {formatRupiah(it.subtotal)}
+                                </span>
+                                <span className="text-[10px] text-slate-500">
+                                  @{formatRupiah(it.unit_price)}/{it.unit || 'unit'}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-sky-50 border border-sky-100">
+                          <span className="font-bold text-slate-700">
+                            Total Harga Obat{prescription.invoice_number ? ` (${prescription.invoice_number})` : ''}
+                          </span>
+                          <span className="font-heading font-extrabold text-sm text-sky-700">
+                            {formatRupiah(prescription.total_amount)}
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>

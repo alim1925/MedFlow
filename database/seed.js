@@ -20,6 +20,7 @@ async function seed() {
     const schemaSql = fs.readFileSync(schemaPath, 'utf8');
     console.log('📜 Executing schema.sql DDL...');
     await client.query(schemaSql);
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;');
     console.log('✅ Schema DDL applied successfully.');
 
     // 2. BEGIN Transaction
@@ -29,12 +30,12 @@ async function seed() {
     console.log('👤 Seeding Admin user...');
     const adminPasswordHash = bcrypt.hashSync('Admin123!', 10);
     const adminUserRes = await client.query(
-      `INSERT INTO users (email, password_hash, role, is_active)
-       VALUES ($1, $2, 'ADMIN', true)
+      `INSERT INTO users (email, password_hash, role, birth_date, is_active)
+       VALUES ($1, $2, 'ADMIN', $3, true)
        ON CONFLICT (email) DO UPDATE
-       SET password_hash = $2, role = 'ADMIN', is_active = true
+       SET password_hash = $2, role = 'ADMIN', birth_date = COALESCE(users.birth_date, $3), is_active = true
        RETURNING id, email, role;`,
-      ['admin@medflow.com', adminPasswordHash]
+      ['admin@medflow.com', adminPasswordHash, '1985-01-15']
     );
     const adminUserId = adminUserRes.rows[0].id;
     console.log(`✅ Admin user seeded: ${adminUserRes.rows[0].email} (ID: ${adminUserId})`);
@@ -88,6 +89,7 @@ async function seed() {
     const doctorsData = [
       {
         email: 'dr.budi@medflow.com',
+        birthDate: '1978-05-12',
         fullName: 'Dr. Budi Santoso, Sp.PD',
         str: 'STR-PD-0019283',
         poliName: 'Poli Penyakit Dalam',
@@ -96,6 +98,7 @@ async function seed() {
       },
       {
         email: 'dr.siti@medflow.com',
+        birthDate: '1984-08-17',
         fullName: 'Dr. Siti Rahma, Sp.A',
         str: 'STR-AN-0028471',
         poliName: 'Poli Anak',
@@ -104,6 +107,7 @@ async function seed() {
       },
       {
         email: 'dr.andi@medflow.com',
+        birthDate: '1981-11-03',
         fullName: 'Dr. Andi Wijaya, Sp.M',
         str: 'STR-MT-0039182',
         poliName: 'Poli Mata',
@@ -112,6 +116,7 @@ async function seed() {
       },
       {
         email: 'drg.maya@medflow.com',
+        birthDate: '1989-02-28',
         fullName: 'Drg. Maya Kartika',
         str: 'STR-GG-0048192',
         poliName: 'Poli Gigi & Mulut',
@@ -120,6 +125,7 @@ async function seed() {
       },
       {
         email: 'dr.hendra@medflow.com',
+        birthDate: '1992-07-19',
         fullName: 'Dr. Hendra Pratama',
         str: 'STR-UM-0059281',
         poliName: 'Poli Umum',
@@ -131,11 +137,11 @@ async function seed() {
     for (const doc of doctorsData) {
       // Create user account
       const userRes = await client.query(
-        `INSERT INTO users (email, password_hash, role, is_active)
-         VALUES ($1, $2, 'DOCTOR', true)
-         ON CONFLICT (email) DO UPDATE SET password_hash = $2, is_active = true
+        `INSERT INTO users (email, password_hash, role, birth_date, is_active)
+         VALUES ($1, $2, 'DOCTOR', $3, true)
+         ON CONFLICT (email) DO UPDATE SET password_hash = $2, birth_date = COALESCE(users.birth_date, $3), is_active = true
          RETURNING id;`,
-        [doc.email, doctorPasswordHash]
+        [doc.email, doctorPasswordHash, doc.birthDate]
       );
       const doctorUserId = userRes.rows[0].id;
       const poliId = poliMap[doc.poliName];
@@ -182,11 +188,11 @@ async function seed() {
     console.log('🧑 Seeding Patient user & medical profile...');
     const patientPasswordHash = bcrypt.hashSync('Patient123!', 10);
     const patientUserRes = await client.query(
-      `INSERT INTO users (email, password_hash, role, is_active)
-       VALUES ($1, $2, 'PATIENT', true)
-       ON CONFLICT (email) DO UPDATE SET password_hash = $2, is_active = true
+      `INSERT INTO users (email, password_hash, role, birth_date, is_active)
+       VALUES ($1, $2, 'PATIENT', $3, true)
+       ON CONFLICT (email) DO UPDATE SET password_hash = $2, birth_date = COALESCE(users.birth_date, $3), is_active = true
        RETURNING id;`,
-      ['patient@medflow.com', patientPasswordHash]
+      ['patient@medflow.com', patientPasswordHash, '1990-04-23']
     );
     const patientUserId = patientUserRes.rows[0].id;
 

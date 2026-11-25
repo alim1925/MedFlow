@@ -45,6 +45,7 @@ export default function AdminDoctorsPage() {
     full_name: '',
     poli_id: '',
     str_number: '',
+    birth_date: '',
     bio: '',
   });
 
@@ -76,6 +77,7 @@ export default function AdminDoctorsPage() {
       full_name: '',
       poli_id: polis.length > 0 ? String(polis[0].id) : '',
       str_number: '',
+      birth_date: '',
       bio: '',
     });
     setError('');
@@ -90,6 +92,7 @@ export default function AdminDoctorsPage() {
       full_name: doc.full_name || '',
       poli_id: String(doc.poli_id || ''),
       str_number: doc.str_number || '',
+      birth_date: doc.birth_date ? String(doc.birth_date).slice(0, 10) : '',
       bio: doc.bio || '',
     });
     setError('');
@@ -119,6 +122,7 @@ export default function AdminDoctorsPage() {
       data.append('full_name', formData.full_name.trim());
       data.append('poli_id', formData.poli_id);
       data.append('str_number', formData.str_number.trim());
+      data.append('birth_date', formData.birth_date || '');
       data.append('bio', formData.bio.trim());
 
       let res;
@@ -458,6 +462,22 @@ export default function AdminDoctorsPage() {
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
+            </div>
+
+            {/* Birth Date */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                Tanggal Lahir Dokter
+              </label>
+              <input
+                type="date"
+                value={formData.birth_date}
+                onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Digunakan untuk verifikasi pemilik akun saat menggunakan fitur lupa kata sandi.
+              </p>
             </div>
 
             {/* Bio */}

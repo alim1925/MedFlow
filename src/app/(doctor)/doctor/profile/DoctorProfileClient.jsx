@@ -6,6 +6,7 @@ import { apiRequest } from '@/lib/apiClient';
 import {
   Stethoscope,
   Award,
+  CalendarDays,
   Phone,
   FileText,
   Mail,
@@ -18,6 +19,21 @@ import {
   Save,
   Image as ImageIcon,
 } from 'lucide-react';
+
+function formatBirthDate(value) {
+  if (!value) return 'Belum diisi';
+  const date =
+    value instanceof Date
+      ? value
+      : new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T00:00:00` : value);
+  return Number.isNaN(date.getTime())
+    ? 'Belum diisi'
+    : new Intl.DateTimeFormat('id-ID', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      }).format(date);
+}
 
 function ProfileField({ icon: Icon, label, value }) {
   return (
@@ -44,6 +60,7 @@ export default function DoctorProfileClient({ initialDoctor }) {
   const [formData, setFormData] = useState({
     full_name: initialDoctor?.full_name || '',
     str_number: initialDoctor?.str_number || '',
+    birth_date: initialDoctor?.birth_date ? String(initialDoctor.birth_date).slice(0, 10) : '',
     phone: initialDoctor?.phone || '',
     bio: initialDoctor?.bio || '',
     photo_url: initialDoctor?.photo_url || '',
@@ -53,6 +70,7 @@ export default function DoctorProfileClient({ initialDoctor }) {
     setFormData({
       full_name: doctor?.full_name || '',
       str_number: doctor?.str_number || '',
+      birth_date: doctor?.birth_date ? String(doctor.birth_date).slice(0, 10) : '',
       phone: doctor?.phone || '',
       bio: doctor?.bio || '',
       photo_url: doctor?.photo_url || '',
@@ -198,6 +216,16 @@ export default function DoctorProfileClient({ initialDoctor }) {
             </div>
 
             <div>
+              <label className="block font-semibold text-slate-700 mb-1">Tanggal Lahir</label>
+              <input
+                type="date"
+                value={formData.birth_date}
+                onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
+            </div>
+
+            <div>
               <label className="block font-semibold text-slate-700 mb-1">Nomor Telepon</label>
               <input
                 type="text"
@@ -208,7 +236,7 @@ export default function DoctorProfileClient({ initialDoctor }) {
               />
             </div>
 
-            <div>
+            <div className="sm:col-span-2">
               <label className="block font-semibold text-slate-700 mb-1">URL Foto Profil</label>
               <input
                 type="text"
@@ -260,6 +288,7 @@ export default function DoctorProfileClient({ initialDoctor }) {
             <ProfileField icon={Award} label="Nomor STR" value={doctor.str_number} />
             <ProfileField icon={Building2} label="Poliklinik" value={doctor.poli_name} />
             <ProfileField icon={Mail} label="Email Akun" value={doctor.email} />
+            <ProfileField icon={CalendarDays} label="Tanggal Lahir" value={formatBirthDate(doctor.birth_date)} />
             <ProfileField icon={Phone} label="Nomor Telepon" value={doctor.phone} />
             <ProfileField icon={ImageIcon} label="URL Foto Profil" value={doctor.photo_url} />
           </div>

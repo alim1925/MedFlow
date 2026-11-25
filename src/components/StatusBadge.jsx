@@ -11,6 +11,8 @@ import {
   PackageCheck,
   ShoppingBag,
   HelpCircle,
+  CreditCard,
+  BadgeCheck,
 } from 'lucide-react';
 
 const STATUS_MAP = {
@@ -24,6 +26,10 @@ const STATUS_MAP = {
   PROCESSING: { label: 'Diproses', icon: Loader2, className: 'bg-blue-50 text-blue-700 border-blue-200', spin: true },
   READY: { label: 'Siap Diambil', icon: PackageCheck, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   PICKED_UP: { label: 'Sudah Diambil', icon: ShoppingBag, className: 'bg-purple-50 text-purple-700 border-purple-200' },
+  UNPAID: { label: 'Belum Dibayar', icon: CreditCard, className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  WAITING_CONFIRMATION: { label: 'Menunggu Konfirmasi', icon: Hourglass, className: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  PAID: { label: 'Lunas', icon: BadgeCheck, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  PAYMENT_REJECTED: { label: 'Pembayaran Ditolak', icon: XCircle, className: 'bg-red-50 text-red-700 border-red-200' },
 };
 
 const SIZE_MAP = {

@@ -27,6 +27,7 @@ import {
   UserRound,
   BarChart3,
   Wrench,
+  CreditCard,
 } from 'lucide-react';
 
 const DOCTOR_NAV_ITEMS = [
@@ -45,6 +46,7 @@ const ADMIN_NAV_ITEMS = [
   { label: 'Dokter', href: '/admin/doctors', icon: UserCheck },
   { label: 'Obat & Stok', href: '/admin/medicines', icon: Pill },
   { label: 'Farmasi', href: '/admin/pharmacy', icon: ShoppingBag },
+  { label: 'Pembayaran Obat', href: '/admin/payments', icon: CreditCard },
   { label: 'Semua Janji', href: '/admin/appointments', icon: CalendarDays },
   { label: 'Laporan Operasional', href: '/admin/reports', icon: BarChart3 },
   { label: 'Audit Log', href: '/admin/audit-logs', icon: History },

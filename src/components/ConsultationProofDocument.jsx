@@ -20,6 +20,7 @@ import {
   getPrescriptionStatusLabel,
   normalizeRecordForDocument,
 } from '@/lib/medicalRecordPdf';
+import { formatRupiah } from '@/lib/currency';
 
 export default function ConsultationProofDocument({ record, userRole = 'PATIENT' }) {
   const router = useRouter();
@@ -332,6 +333,8 @@ export default function ConsultationProofDocument({ record, userRole = 'PATIENT'
                         <th className="py-2.5 px-3 w-10">No</th>
                         <th className="py-2.5 px-3">Nama Obat & Sediaan</th>
                         <th className="py-2.5 px-3 text-center">Jumlah</th>
+                        <th className="py-2.5 px-3 text-right">Harga</th>
+                        <th className="py-2.5 px-3 text-right">Subtotal</th>
                         <th className="py-2.5 px-3">Aturan Pakai</th>
                         <th className="py-2.5 px-3 text-center">Durasi</th>
                       </tr>
@@ -353,6 +356,12 @@ export default function ConsultationProofDocument({ record, userRole = 'PATIENT'
                           <td className="py-2.5 px-3 text-center font-bold text-slate-900 whitespace-nowrap">
                             {it.quantity} {it.unit || 'unit'}
                           </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-700 whitespace-nowrap">
+                            {formatRupiah(it.unit_price)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-900 whitespace-nowrap">
+                            {formatRupiah(it.subtotal ?? (Number(it.quantity) || 0) * (Number(it.unit_price) || 0))}
+                          </td>
                           <td className="py-2.5 px-3 text-slate-700">{it.dosage_rule || '-'}</td>
                           <td className="py-2.5 px-3 text-center text-slate-600 whitespace-nowrap">
                             {it.duration_days ? `${it.duration_days} hari` : '-'}
@@ -360,6 +369,19 @@ export default function ConsultationProofDocument({ record, userRole = 'PATIENT'
                         </tr>
                       ))}
                     </tbody>
+                    {Number(doc.prescription.total_amount) >= 0 && (
+                      <tfoot className="bg-slate-50 border-t border-slate-200">
+                        <tr>
+                          <td colSpan={4} className="py-2.5 px-3 text-right font-bold text-slate-700">
+                            Total Biaya Obat:
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-heading font-extrabold text-sky-800 whitespace-nowrap">
+                            {formatRupiah(doc.prescription.total_amount)}
+                          </td>
+                          <td colSpan={2} />
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
 

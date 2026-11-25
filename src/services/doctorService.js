@@ -1,4 +1,5 @@
 import { query, withTransaction } from '@/lib/db';
+import { ensureAuthSchema } from '@/lib/authSchema';
 import { getCurrentUser, createSession } from '@/lib/auth';
 import { scheduleSchema, doctorProfileUpdateSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
@@ -56,7 +57,7 @@ function normalizeInput(input) {
 
 export async function getDoctorProfile() {
   try {
-    await ensureDoctorColumns();
+    await Promise.all([ensureDoctorColumns(), ensureAuthSchema()]);
     const { doctor } = await requireDoctor();
 
     const res = await query(
@@ -64,7 +65,8 @@ export async function getDoctorProfile() {
          d.*,
          p.name AS poli_name,
          p.description AS poli_description,
-         u.email
+         u.email,
+         TO_CHAR(u.birth_date, 'YYYY-MM-DD') AS birth_date
        FROM doctors d
        LEFT JOIN polis p ON d.poli_id = p.id
        JOIN users u ON d.user_id = u.id
@@ -83,69 +85,86 @@ export async function getDoctorProfile() {
 
 export async function updateDoctorProfile(input) {
   try {
-    await ensureDoctorColumns();
+    await Promise.all([ensureDoctorColumns(), ensureAuthSchema()]);
     const { user, doctor } = await requireDoctor();
     const raw = normalizeInput(input);
 
     const validation = doctorProfileUpdateSchema.safeParse({
       full_name: raw.full_name,
       str_number: raw.str_number,
+      birth_date: raw.birth_date?.trim() || '',
       phone: raw.phone?.trim() || '',
       bio: raw.bio?.trim() || '',
       photo_url: raw.photo_url?.trim() || '',
     });
 
     if (!validation.success) {
+      const firstError =
+        validation.error?.issues?.[0]?.message ||
+        validation.error?.errors?.[0]?.message ||
+        'Data profil dokter tidak valid.';
       return {
         success: false,
-        error: validation.error.errors[0]?.message || 'Data profil dokter tidak valid.',
+        error: firstError,
         status: 400,
       };
     }
 
     const d = validation.data;
+    const normalizedBirthDate = d.birth_date ? d.birth_date.trim() : null;
 
-    await query(
-      `UPDATE doctors
-       SET full_name = $1,
-           str_number = $2,
-           phone = $3,
-           bio = $4,
-           photo_url = $5,
-           updated_at = NOW()
-       WHERE id = $6`,
-      [
-        d.full_name.trim(),
-        d.str_number.trim(),
-        d.phone ? d.phone.trim() : null,
-        d.bio ? d.bio.trim() : null,
-        d.photo_url ? d.photo_url.trim() : null,
-        doctor.id,
-      ]
-    );
+    const updated = await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE doctors
+         SET full_name = $1,
+             str_number = $2,
+             phone = $3,
+             bio = $4,
+             photo_url = $5,
+             updated_at = NOW()
+         WHERE id = $6`,
+        [
+          d.full_name.trim(),
+          d.str_number.trim(),
+          d.phone ? d.phone.trim() : null,
+          d.bio ? d.bio.trim() : null,
+          d.photo_url ? d.photo_url.trim() : null,
+          doctor.id,
+        ]
+      );
 
-    const refreshed = await query(
-      `SELECT d.*, p.name AS poli_name, p.description AS poli_description, u.email
-       FROM doctors d
-       LEFT JOIN polis p ON d.poli_id = p.id
-       JOIN users u ON d.user_id = u.id
-       WHERE d.id = $1`,
-      [doctor.id]
-    );
-    const updated = refreshed.rows[0];
+      await client.query(
+        `UPDATE users
+         SET birth_date = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [normalizedBirthDate, user.id]
+      );
 
-    await query(
-      `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
-       VALUES ($1, 'UPDATE_DOCTOR_PROFILE', 'doctors', $2, $3)`,
-      [
-        user.id,
-        doctor.id,
-        JSON.stringify({
-          full_name: updated.full_name,
-          str_number: updated.str_number,
-        }),
-      ]
-    );
+      const refreshed = await client.query(
+        `SELECT d.*, p.name AS poli_name, p.description AS poli_description, u.email,
+                TO_CHAR(u.birth_date, 'YYYY-MM-DD') AS birth_date
+         FROM doctors d
+         LEFT JOIN polis p ON d.poli_id = p.id
+         JOIN users u ON d.user_id = u.id
+         WHERE d.id = $1`,
+        [doctor.id]
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'UPDATE_DOCTOR_PROFILE', 'doctors', $2, $3)`,
+        [
+          user.id,
+          doctor.id,
+          JSON.stringify({
+            full_name: refreshed.rows[0].full_name,
+            str_number: refreshed.rows[0].str_number,
+          }),
+        ]
+      );
+
+      return refreshed.rows[0];
+    });
 
     if (updated.full_name !== user.name) {
       await createSession({

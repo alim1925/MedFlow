@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+function isValidCalendarDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return false;
+  }
+  const todayStr = new Date().toISOString().slice(0, 10);
+  return value <= todayStr;
+}
+
 // ============================================================================
 // 1. Auth Schemas
 // ============================================================================
@@ -11,6 +28,12 @@ export const loginSchema = z.object({
 
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().email('Format email tidak valid'),
+  birth_date: z
+    .string()
+    .trim()
+    .min(1, 'Tanggal lahir wajib diisi')
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal lahir harus YYYY-MM-DD')
+    .refine(isValidCalendarDate, 'Tanggal lahir tidak valid atau melebihi tanggal hari ini'),
 });
 
 export const resetPasswordSchema = z
@@ -268,6 +291,14 @@ export const patientProfileUpdateSchema = z.object({
 export const doctorProfileUpdateSchema = z.object({
   full_name: z.string().trim().min(2, 'Nama lengkap minimal 2 karakter'),
   str_number: z.string().trim().min(5, 'Nomor STR minimal 5 karakter'),
+  birth_date: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal lahir harus YYYY-MM-DD')
+    .refine(isValidCalendarDate, 'Tanggal lahir tidak valid atau melebihi tanggal hari ini')
+    .optional()
+    .or(z.literal(''))
+    .nullable(),
   phone: z.string().trim().max(30, 'Nomor telepon maksimal 30 karakter').optional().nullable(),
   bio: z.string().trim().optional().nullable(),
   photo_url: z.string().trim().optional().nullable(),

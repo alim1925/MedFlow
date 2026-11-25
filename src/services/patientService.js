@@ -1,4 +1,5 @@
 import { query, withTransaction } from '@/lib/db';
+import { ensureAuthSchema } from '@/lib/authSchema';
 import { getCurrentUser, createSession } from '@/lib/auth';
 import { bookingSchema, feedbackSchema, patientProfileUpdateSchema, prescriptionPaymentSubmitSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
@@ -77,49 +78,59 @@ export async function updatePatientProfile(input) {
     }
 
     const d = validation.data;
+    await ensureAuthSchema();
 
-    const res = await query(
-      `UPDATE patients
-       SET full_name = $1,
-           nik = $2,
-           birth_date = $3,
-           gender = $4,
-           blood_type = $5,
-           phone = $6,
-           address = $7,
-           emergency_contact = $8,
-           allergies = $9,
-           updated_at = NOW()
-       WHERE id = $10
-       RETURNING *`,
-      [
-        d.full_name.trim(),
-        d.nik ? d.nik.trim() : null,
-        d.birth_date,
-        d.gender,
-        d.blood_type ? d.blood_type.trim() : null,
-        d.phone ? d.phone.trim() : null,
-        d.address ? d.address.trim() : null,
-        d.emergency_contact ? d.emergency_contact.trim() : null,
-        d.allergies ? d.allergies.trim() : null,
-        patient.id,
-      ]
-    );
+    const updated = await withTransaction(async (client) => {
+      const res = await client.query(
+        `UPDATE patients
+         SET full_name = $1,
+             nik = $2,
+             birth_date = $3,
+             gender = $4,
+             blood_type = $5,
+             phone = $6,
+             address = $7,
+             emergency_contact = $8,
+             allergies = $9,
+             updated_at = NOW()
+         WHERE id = $10
+         RETURNING *`,
+        [
+          d.full_name.trim(),
+          d.nik ? d.nik.trim() : null,
+          d.birth_date,
+          d.gender,
+          d.blood_type ? d.blood_type.trim() : null,
+          d.phone ? d.phone.trim() : null,
+          d.address ? d.address.trim() : null,
+          d.emergency_contact ? d.emergency_contact.trim() : null,
+          d.allergies ? d.allergies.trim() : null,
+          patient.id,
+        ]
+      );
 
-    const updated = res.rows[0];
+      await client.query(
+        `UPDATE users
+         SET birth_date = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [d.birth_date, user.id]
+      );
 
-    await query(
-      `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
-       VALUES ($1, 'UPDATE_PATIENT_PROFILE', 'patients', $2, $3)`,
-      [
-        user.id,
-        patient.id,
-        JSON.stringify({
-          full_name: updated.full_name,
-          phone: updated.phone,
-        }),
-      ]
-    );
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'UPDATE_PATIENT_PROFILE', 'patients', $2, $3)`,
+        [
+          user.id,
+          patient.id,
+          JSON.stringify({
+            full_name: res.rows[0].full_name,
+            phone: res.rows[0].phone,
+          }),
+        ]
+      );
+
+      return res.rows[0];
+    });
 
     if (updated.full_name !== user.name) {
       await createSession({

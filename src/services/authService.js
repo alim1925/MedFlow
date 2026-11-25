@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '@/lib/db';
+import { ensureAuthSchema } from '@/lib/authSchema';
 import { createSession, destroySession, getCurrentUser } from '@/lib/auth';
 import {
   loginSchema,
@@ -11,41 +12,17 @@ import {
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
 
 const RESET_TOKEN_TTL_MINUTES = 30;
-let ensureResetTablePromise = null;
-
-/**
- * Ensure the password_reset_tokens table exists in PostgreSQL.
- * Allows the feature to work out-of-the-box without requiring a manual DB re-seed.
- */
-async function ensurePasswordResetTable() {
-  if (!ensureResetTablePromise) {
-    ensureResetTablePromise = (async () => {
-      await query(`
-        CREATE TABLE IF NOT EXISTS password_reset_tokens (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          token_hash VARCHAR(64) UNIQUE NOT NULL,
-          expires_at TIMESTAMP NOT NULL,
-          used_at TIMESTAMP,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-      await query(
-        'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id)'
-      );
-      await query(
-        'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at)'
-      );
-    })().catch((err) => {
-      ensureResetTablePromise = null;
-      throw err;
-    });
-  }
-  return ensureResetTablePromise;
-}
 
 function hashResetToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function safeCompareDateStrings(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 function maskEmail(email) {
@@ -135,16 +112,18 @@ export async function registerPatient(input) {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
+    await ensureAuthSchema();
+
     const currentYear = new Date().getFullYear();
     const randomDigits = String(Math.floor(100000 + Math.random() * 900000));
     const medicalRecordNo = `MR${currentYear}${randomDigits}`;
 
     const result = await withTransaction(async (client) => {
       const userRes = await client.query(
-        `INSERT INTO users (email, password_hash, role, is_active)
-         VALUES ($1, $2, 'PATIENT', true)
+        `INSERT INTO users (email, password_hash, role, birth_date, is_active)
+         VALUES ($1, $2, 'PATIENT', $3, true)
          RETURNING id, email, role`,
-        [normalizedEmail, passwordHash]
+        [normalizedEmail, passwordHash, birth_date]
       );
       const newUser = userRes.rows[0];
 
@@ -348,11 +327,10 @@ export async function getAuthUser() {
 }
 
 /**
- * Create a single-use password reset token for an active user account.
- * In development mode without an email provider, returns `devResetPath` so
- * the reset flow can be tested directly from the UI.
+ * Verify account owner's email and birth date, then create a single-use
+ * password reset token so the user can proceed to set a new password.
  * @param {FormData|Object} input
- * @returns {Promise<{success: boolean, message?: string, devResetPath?: string, error?: string, status?: number}>}
+ * @returns {Promise<{success: boolean, message?: string, resetPath?: string, devResetPath?: string, error?: string, status?: number}>}
  */
 export async function requestPasswordReset(input) {
   try {
@@ -361,32 +339,81 @@ export async function requestPasswordReset(input) {
     if (!validation.success) {
       return {
         success: false,
-        error: getZodFirstError(validation, 'Format email tidak valid.'),
+        error: getZodFirstError(validation, 'Email dan tanggal lahir wajib diisi dengan benar.'),
         status: 400,
       };
     }
 
-    await ensurePasswordResetTable();
+    await ensureAuthSchema();
 
     const normalizedEmail = validation.data.email.toLowerCase().trim();
+    const submittedBirthDate = validation.data.birth_date;
+
     const userRes = await query(
-      `SELECT id, email, is_active
-       FROM users
-       WHERE LOWER(email) = $1`,
+      `SELECT
+         u.id,
+         u.email,
+         u.role,
+         u.is_active,
+         TO_CHAR(COALESCE(p.birth_date, u.birth_date), 'YYYY-MM-DD') AS account_birth_date
+       FROM users u
+       LEFT JOIN patients p ON p.user_id = u.id
+       WHERE LOWER(u.email) = $1`,
       [normalizedEmail]
     );
 
-    const genericMessage =
-      'Jika email terdaftar dan aktif, tautan pengaturan ulang kata sandi telah disiapkan (berlaku selama 30 menit).';
+    const mismatchMessage =
+      'Email atau tanggal lahir tidak sesuai dengan data pemilik akun yang terdaftar.';
 
-    if (userRes.rows.length === 0 || !userRes.rows[0].is_active) {
+    if (userRes.rows.length === 0) {
       return {
-        success: true,
-        message: genericMessage,
+        success: false,
+        error: mismatchMessage,
+        status: 400,
       };
     }
 
     const user = userRes.rows[0];
+
+    if (!user.account_birth_date) {
+      return {
+        success: false,
+        error:
+          'Tanggal lahir pemilik akun belum terdaftar pada sistem. Silakan hubungi administrator untuk melengkapi data akun.',
+        status: 400,
+      };
+    }
+
+    if (!safeCompareDateStrings(user.account_birth_date, submittedBirthDate)) {
+      await query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'PASSWORD_RESET_VERIFICATION_FAILED', 'users', $2, $3)`,
+        [
+          user.id,
+          user.id,
+          JSON.stringify({
+            email: user.email,
+            verification_method: 'BIRTH_DATE',
+            timestamp: new Date().toISOString(),
+          }),
+        ]
+      ).catch(() => {});
+
+      return {
+        success: false,
+        error: mismatchMessage,
+        status: 400,
+      };
+    }
+
+    if (!user.is_active) {
+      return {
+        success: false,
+        error: 'Akun Anda sedang dinonaktifkan. Silakan hubungi administrator.',
+        status: 403,
+      };
+    }
+
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = hashResetToken(rawToken);
 
@@ -412,6 +439,7 @@ export async function requestPasswordReset(input) {
           user.id,
           JSON.stringify({
             email: user.email,
+            verification_method: 'BIRTH_DATE',
             expires_in_minutes: RESET_TOKEN_TTL_MINUTES,
             timestamp: new Date().toISOString(),
           }),
@@ -429,7 +457,9 @@ export async function requestPasswordReset(input) {
 
     return {
       success: true,
-      message: genericMessage,
+      message:
+        'Verifikasi tanggal lahir berhasil. Anda dapat langsung mengatur ulang kata sandi akun Anda.',
+      resetPath,
       ...(isDev ? { devResetPath: resetPath } : {}),
     };
   } catch (err) {
@@ -457,7 +487,7 @@ export async function verifyPasswordResetToken(token) {
       };
     }
 
-    await ensurePasswordResetTable();
+    await ensureAuthSchema();
 
     const tokenHash = hashResetToken(cleanToken);
     const res = await query(
@@ -534,7 +564,7 @@ export async function resetPasswordWithToken(input) {
       };
     }
 
-    await ensurePasswordResetTable();
+    await ensureAuthSchema();
 
     const { token, password } = validation.data;
     const tokenHash = hashResetToken(token);

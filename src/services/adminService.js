@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '@/lib/db';
+import { ensureAuthSchema } from '@/lib/authSchema';
 import { getCurrentUser } from '@/lib/auth';
 import { poliSchema, medicineSchema } from '@/lib/validators';
 import { ServiceError, toServiceErrorResult } from '@/lib/serviceErrors';
@@ -308,6 +309,7 @@ export async function togglePoliActive(id) {
 export async function getDoctors() {
   try {
     await requireAdmin();
+    await ensureAuthSchema();
 
     const res = await query(
       `SELECT 
@@ -321,6 +323,7 @@ export async function getDoctors() {
          d.is_active,
          d.created_at,
          u.email,
+         TO_CHAR(u.birth_date, 'YYYY-MM-DD') AS birth_date,
          u.is_active AS user_active,
          p.name AS poli_name
        FROM doctors d
@@ -341,14 +344,24 @@ export async function getDoctors() {
 export async function createDoctor(input) {
   try {
     const admin = await requireAdmin();
+    await ensureAuthSchema();
     const raw = normalizeInput(input);
 
-    const { email, password, full_name, poli_id, str_number, bio, photo_url } = raw;
+    const { email, password, full_name, poli_id, str_number, birth_date, bio, photo_url } = raw;
+    const normalizedBirthDate = birth_date?.trim() || null;
 
     if (!email || !password || !full_name || !poli_id || !str_number) {
       return {
         success: false,
         error: 'Email, kata sandi, nama lengkap, poli, dan nomor STR wajib diisi.',
+        status: 400,
+      };
+    }
+
+    if (normalizedBirthDate && !/^\d{4}-\d{2}-\d{2}$/.test(normalizedBirthDate)) {
+      return {
+        success: false,
+        error: 'Format tanggal lahir dokter harus YYYY-MM-DD.',
         status: 400,
       };
     }
@@ -377,10 +390,10 @@ export async function createDoctor(input) {
 
     const result = await withTransaction(async (client) => {
       const userRes = await client.query(
-        `INSERT INTO users (email, password_hash, role, is_active)
-         VALUES ($1, $2, 'DOCTOR', true)
+        `INSERT INTO users (email, password_hash, role, birth_date, is_active)
+         VALUES ($1, $2, 'DOCTOR', $3, true)
          RETURNING id, email, role`,
-        [normalizedEmail, passwordHash]
+        [normalizedEmail, passwordHash, normalizedBirthDate]
       );
       const newUser = userRes.rows[0];
 
@@ -435,9 +448,12 @@ export async function createDoctor(input) {
 export async function updateDoctor(id, input) {
   try {
     const admin = await requireAdmin();
+    await ensureAuthSchema();
     const raw = normalizeInput(input);
 
-    const { full_name, poli_id, str_number, bio, photo_url } = raw;
+    const { full_name, poli_id, str_number, birth_date, bio, photo_url } = raw;
+    const hasBirthDateInput = birth_date !== undefined;
+    const normalizedBirthDate = birth_date?.trim() || null;
 
     if (!full_name || !poli_id || !str_number) {
       return {
@@ -447,32 +463,57 @@ export async function updateDoctor(id, input) {
       };
     }
 
-    const res = await query(
-      `UPDATE doctors
-       SET full_name = $1, poli_id = $2, str_number = $3, bio = $4, photo_url = $5, updated_at = NOW()
-       WHERE id = $6
-       RETURNING *`,
-      [
-        full_name.trim(),
-        poli_id,
-        str_number.trim(),
-        bio?.trim() || null,
-        photo_url?.trim() || null,
-        id,
-      ]
-    );
-
-    if (res.rows.length === 0) {
-      return { success: false, error: 'Dokter tidak ditemukan.', status: 404 };
+    if (normalizedBirthDate && !/^\d{4}-\d{2}-\d{2}$/.test(normalizedBirthDate)) {
+      return {
+        success: false,
+        error: 'Format tanggal lahir dokter harus YYYY-MM-DD.',
+        status: 400,
+      };
     }
 
-    const updated = res.rows[0];
+    const updated = await withTransaction(async (client) => {
+      const res = await client.query(
+        `UPDATE doctors
+         SET full_name = $1, poli_id = $2, str_number = $3, bio = $4, photo_url = $5, updated_at = NOW()
+         WHERE id = $6
+         RETURNING *`,
+        [
+          full_name.trim(),
+          poli_id,
+          str_number.trim(),
+          bio?.trim() || null,
+          photo_url?.trim() || null,
+          id,
+        ]
+      );
 
-    await query(
-      `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
-       VALUES ($1, 'UPDATE_DOCTOR', 'doctors', $2, $3)`,
-      [admin.id, updated.id, JSON.stringify({ full_name: updated.full_name })]
-    );
+      if (res.rows.length === 0) {
+        return null;
+      }
+
+      const doctorRow = res.rows[0];
+
+      if (hasBirthDateInput) {
+        await client.query(
+          `UPDATE users
+           SET birth_date = $1, updated_at = NOW()
+           WHERE id = $2`,
+          [normalizedBirthDate, doctorRow.user_id]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity, entity_id, metadata)
+         VALUES ($1, 'UPDATE_DOCTOR', 'doctors', $2, $3)`,
+        [admin.id, doctorRow.id, JSON.stringify({ full_name: doctorRow.full_name })]
+      );
+
+      return doctorRow;
+    });
+
+    if (!updated) {
+      return { success: false, error: 'Dokter tidak ditemukan.', status: 404 };
+    }
 
     return {
       success: true,

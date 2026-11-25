@@ -146,7 +146,7 @@ CREATE DATABASE db_medflow;
 
 > **Catatan Koneksi Database**:  
 > Secara bawaan pada `src/lib/db.js` dan `database/seed.js`, aplikasi terhubung ke:
-> `postgresql://postgres:alim123@localhost:5432/db_medflow`  
+> `postgresql://postgres:sandi_anda@localhost:5432/db_medflow`  
 > Jika username, password, host, atau port PostgreSQL lokal Anda berbeda, sesuaikan `connectionString` pada `src/lib/db.js` dan `database/seed.js` sebelum menjalankan seed.
 
 ### 4. Konfigurasi Environment Variable
@@ -215,12 +215,7 @@ Setelah menjalankan `npm run db:seed`, Anda dapat langsung masuk menggunakan aku
 3. **Proses Resep Farmasi**: Ubah status antrean resep di menu **Farmasi** (`/admin/pharmacy`) mulai dari *Menunggu* hingga *Sudah Diambil*.
 4. **Monitoring & Keuangan**: Pantau ringkasan pendapatan, pengeluaran, gaji, piutang, pemeliharaan alat di **Laporan Operasional**, serta jejak aktivitas sistem di **Audit Log**.
 
-### Alur Lupa Kata Sandi (Semua Peran)
-1. Klik **Lupa sandi?** pada halaman `/login` atau buka `/forgot-password`.
-2. Masukkan **Alamat Email Terdaftar** dan **Tanggal Lahir Pemilik Akun**.
-3. Setelah verifikasi berhasil, Anda akan diarahkan ke halaman `/reset-password` untuk membuat kata sandi baru minimal 8 karakter.
 
----
 
 ## Skrip NPM
 
